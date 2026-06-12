@@ -147,18 +147,19 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
 /* ── mobile: single panel + bottom tab bar ──────────────────── */
 @media (max-width: 900px) {
   body { font-size: 14px; }
-  #app { grid-template-columns: 1fr; grid-template-rows: 40px 1fr 46px; gap: 6px; padding: 6px; }
+  /* tabs sit at the TOP — Safari's bottom address bar overlaps anything down there */
+  #app { grid-template-columns: 1fr; grid-template-rows: 40px 42px 1fr; gap: 6px; padding: 6px; }
   header { grid-column: 1; padding: 0 8px; gap: 8px; overflow: hidden; }
   header .logo { font-size: 13px; letter-spacing: 2px; }
   #modelChip { display: none; }
   #right { display: contents; }                /* children become grid items */
-  #sessions, #main, #mesh, #memPanel, #ops { grid-row: 2; grid-column: 1; display: none; min-height: 0; }
+  #sessions, #main, #mesh, #memPanel, #ops { grid-row: 3; grid-column: 1; display: none; min-height: 0; }
   body[data-tab="chat"] #main { display: flex; }
   body[data-tab="sess"] #sessions { display: flex; }
   body[data-tab="mesh"] #mesh { display: flex; }
   body[data-tab="brain"] #memPanel { display: flex; }
   body[data-tab="ops"] #ops { display: flex; }
-  #tabs { display: flex; grid-row: 3; grid-column: 1; gap: 6px; }
+  #tabs { display: flex; grid-row: 2; grid-column: 1; gap: 6px; }
   #tabs button { flex: 1; background: var(--panel); border: 1px solid var(--g-faint); color: var(--g-dim);
     font-family: inherit; font-size: 11px; letter-spacing: 1px; cursor: pointer; padding: 0; }
   #tabs button.active { color: var(--g); border-color: var(--g); text-shadow: 0 0 6px var(--g); }
@@ -226,6 +227,14 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
       <div id="opsBody">(idle)</div>
     </div>
   </div>
+
+  <nav id="tabs">
+    <button data-tab="chat" class="active">CHAT</button>
+    <button data-tab="sess">SESS</button>
+    <button data-tab="mesh">MESH</button>
+    <button data-tab="brain">BRAIN</button>
+    <button data-tab="ops">OPS</button>
+  </nav>
 </div>
 
 <div class="modal-bg" id="nodeModalBg"><div class="modal">
@@ -252,14 +261,6 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
     <button class="btn" id="askSend">ANSWER</button>
   </div>
 </div></div>
-
-<nav id="tabs">
-  <button data-tab="chat" class="active">CHAT</button>
-  <button data-tab="sess">SESS</button>
-  <button data-tab="mesh">MESH</button>
-  <button data-tab="brain">BRAIN</button>
-  <button data-tab="ops">OPS</button>
-</nav>
 
 <div id="toast"></div>
 
