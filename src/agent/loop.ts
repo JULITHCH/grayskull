@@ -9,6 +9,7 @@ import { detectGlobalTrigger } from "../memory/memory";
 import { validateCall, recoverTextToolCall } from "./repair";
 import { needsCompaction, compact } from "./compact";
 import { runDiagnostics } from "./diagnostics";
+import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
 import { spawnSync } from "node:child_process";
 
 const MAX_LOOP_TURNS = 40;
@@ -187,7 +188,21 @@ export class GrayskullAgent {
     this.abort?.abort();
   }
 
-  private buildSystemMessage(): ChatMessage {
+  /** Harness-side skill utilization: match the task text, inject winners,
+   *  tell the user. The model cannot skip what is already in its context. */
+  private autoSkills(taskText: string): SkillDef[] {
+    try {
+      const matched = autoMatchSkills(taskText, this.cwd);
+      for (const s of matched) {
+        this.ui.pushItem({ type: "note", text: `⚡ skill auto-loaded: ${s.name}` });
+      }
+      return matched;
+    } catch {
+      return [];
+    }
+  }
+
+  private buildSystemMessage(autoSkills: SkillDef[] = []): ChatMessage {
     const base = loadSystemPrompt(this.cwd, this.settings);
     const git = spawnSync("git", ["status", "--porcelain", "-b"], {
       cwd: this.cwd,
@@ -213,6 +228,7 @@ export class GrayskullAgent {
         skills
           ? `# Available skills\nIf the request involves a topic listed below, you MUST call the skill tool with that skill's name BEFORE writing any code or answer — treat your own memory of these libraries as outdated. Then follow the returned instructions.\n${skills}`
           : "",
+        autoSkillBlock(autoSkills),
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -253,7 +269,7 @@ export class GrayskullAgent {
 
     this.history.push({ role: "user", content: userText });
     const turnLog: string[] = [`user: ${userText.slice(0, 2000)}`];
-    const messages: ChatMessage[] = [this.buildSystemMessage(), ...this.history];
+    const messages: ChatMessage[] = [this.buildSystemMessage(this.autoSkills(userText)), ...this.history];
     let finalText = "";
 
     try {
@@ -289,7 +305,7 @@ export class GrayskullAgent {
     const signal = this.abort.signal;
     this.ui.setBusy(true, "chain step");
     const messages: ChatMessage[] = [
-      this.buildSystemMessage(),
+      this.buildSystemMessage(this.autoSkills(directive)),
       { role: "user", content: directive },
     ];
     try {

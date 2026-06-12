@@ -231,8 +231,13 @@ installed Claude Code plugins (`~/.claude/plugins/cache`), `~/.claude/skills/`,
 `./.claude/skills/`, `~/.config/grayskull/skills/`, `./.grayskull/skills/`.
 Your existing Claude Code skills work without copying anything.
 
-Two ways to fire one:
+Three ways skills fire:
 
+- **auto-utilization (harness-level)**: every prompt — and every chain step and
+  sub-agent task — is lexically matched against the skill catalog; up to 2 winners are
+  injected straight into the turn's context (`⚡ skill auto-loaded: pixijs` note). The
+  model can't skip what's already in front of it. Conservative matching: distinctive
+  name tokens (fuzzy, so "pixi" hits "pixijs") or strong description overlap.
 - you: `/<skill-name> [args]` (autocompletes alongside slash commands)
 - the model: it sees the skill list in its system prompt and calls the `skill` tool
   itself when a request matches

@@ -129,3 +129,77 @@ export function skillInvocation(skill: SkillDef, args: string): string {
     args ? `\nUser arguments: ${args}` : "",
   ].join("\n");
 }
+
+// ── automatic skill utilization ──────────────────────────────────────────
+// The harness matches every prompt against the skill catalog and injects
+// winners into the turn's system message — skill use no longer depends on
+// the model deciding to call the tool.
+
+import { tokenize } from "../memory/scores";
+
+const AUTO_MAX_SKILLS = 2;
+const AUTO_MAX_CHARS = 12_000;
+/** description-overlap threshold for skills whose name isn't in the prompt */
+const DESC_OVERLAP_MIN = 5;
+
+/** "pixi" should hit name part "pixijs"; "migrate" should hit "migration". */
+function fuzzyTokenMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  let common = 0;
+  while (common < a.length && common < b.length && a[common] === b[common]) common++;
+  return common >= 6;
+}
+
+/** Everyday tech words that appear in skill names but are weak intent
+ *  signals on their own — topical matches go through the description path. */
+const GENERIC_NAME_PARTS = new Set(
+  "render rendering scene scenes custom core create creation event events math color colors text mesh mode modes blend concepts performance application app environment environments graphic graphics sprite sprites particle container ticker asset assets filter filters review commit compress help test tests web page code".split(" "),
+);
+
+export function autoMatchSkills(text: string, cwd: string): SkillDef[] {
+  const promptTokens = tokenize(text);
+  if (promptTokens.size === 0) return [];
+  const skills = loadSkills(cwd);
+
+  const scored: Array<{ skill: SkillDef; score: number }> = [];
+  for (const skill of skills) {
+    let score = 0;
+    for (const part of skill.name.toLowerCase().split(/[-_]/)) {
+      // only distinctive, brand-like name parts count as strong intent
+      if (part.length < 4 || GENERIC_NAME_PARTS.has(part)) continue;
+      for (const t of promptTokens) {
+        if (fuzzyTokenMatch(part, t)) {
+          score += 2;
+          break;
+        }
+      }
+    }
+    const descTokens = tokenize(skill.description);
+    let overlap = 0;
+    for (const t of promptTokens) if (descTokens.has(t)) overlap++;
+    if (score === 0 && overlap >= DESC_OVERLAP_MIN) score = overlap / 10;
+    else if (score > 0) score += overlap / 20;
+    if (score > 0) scored.push({ skill, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const picked: SkillDef[] = [];
+  let budget = AUTO_MAX_CHARS;
+  for (const { skill } of scored.slice(0, AUTO_MAX_SKILLS)) {
+    if (skill.body.length > budget) continue;
+    budget -= skill.body.length;
+    picked.push(skill);
+  }
+  return picked;
+}
+
+/** System-message block for auto-loaded skills. */
+export function autoSkillBlock(skills: SkillDef[]): string {
+  if (skills.length === 0) return "";
+  return skills
+    .map(
+      (s) =>
+        `# Auto-loaded skill: ${s.name}\n(loaded because the request matches; follow it. Files referenced relative to the skill live in ${s.dir})\n${s.body}`,
+    )
+    .join("\n\n");
+}

@@ -4,6 +4,7 @@ import type { LlmClient } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import { runToolLoop } from "../agent/loop";
 import { loadAgents, writeAgentDef, DEFAULT_AGENT_TOOLS } from "./registry";
+import { autoMatchSkills, autoSkillBlock } from "../skills/registry";
 
 const SUB_AGENT_MAX_RESULT = 8_000;
 
@@ -95,10 +96,17 @@ export function registerAgentTools(opts: {
       return semaphore.run(async () => {
         ctx.note(`⚔ ${agentName} → ${task.slice(0, 80)}`);
         monitor({ kind: "spawn", id: spawnId, agent: agentName, task });
+        // sub-agents auto-utilize matching skills too
+        let autoSkills = "";
+        try {
+          autoSkills = autoSkillBlock(autoMatchSkills(task, cwd));
+        } catch {
+          // skills are optional context
+        }
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${def.systemPrompt}\n\nYou are a sub-agent. Work autonomously — you cannot ask the user questions. cwd: ${cwd}. When done, your final message is your report; make it complete and self-contained.`,
+            content: `${def.systemPrompt}\n\nYou are a sub-agent. Work autonomously — you cannot ask the user questions. cwd: ${cwd}. When done, your final message is your report; make it complete and self-contained.${autoSkills ? `\n\n${autoSkills}` : ""}`,
           },
           { role: "user", content: task },
         ];
