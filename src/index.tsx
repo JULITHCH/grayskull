@@ -14,6 +14,7 @@ import { agentListing } from "./agents/registry";
 import { skillTool } from "./skills/tool";
 import { skillListing } from "./skills/registry";
 import { ensureStarterChains } from "./chains/registry";
+import { CliLink } from "./web/clilink";
 import { App } from "./ui/App";
 
 const cwd = process.cwd();
@@ -32,7 +33,15 @@ try {
 const client = new LlmClient(settings);
 const registry = new ToolRegistry();
 for (const tool of builtinTools()) registry.register(tool);
-registerAgentTools({ cwd, client, registry, concurrency: settings.agentConcurrency });
+// optional bridge to a running grayskull-web hub (silent retry when absent)
+const link = new CliLink();
+registerAgentTools({
+  cwd,
+  client,
+  registry,
+  concurrency: settings.agentConcurrency,
+  monitor: (ev) => link.publish({ t: "agent", ev }),
+});
 registry.register(skillTool(cwd));
 
 const perms = new PermissionEngine(settings);
@@ -69,6 +78,7 @@ render(
     perms={perms}
     client={client}
     store={store}
+    link={link}
   />,
   { exitOnCtrlC: true },
 );

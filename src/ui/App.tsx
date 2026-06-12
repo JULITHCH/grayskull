@@ -14,6 +14,8 @@ import { COMMANDS, runSlashCommand, type CommandContext } from "../slash";
 import { loadSkills } from "../skills/registry";
 import { runChain, chainState } from "../chains/runner";
 import type { ChainDef, ChainContextMode } from "../chains/registry";
+import type { CliLink } from "../web/clilink";
+import { loadGlobalMemory, loadLocalMemory } from "../memory/memory";
 import { renderMarkdown } from "./markdown";
 import { pickFile } from "./external";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
@@ -64,11 +66,13 @@ type QueuedWork =
   | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string };
 
 interface PendingPermission {
+  reqId: string;
   req: PermissionRequest;
   resolve: (answer: "yes" | "always" | "no") => void;
 }
 
 interface PendingAsk {
+  reqId: string;
   question: string;
   options?: string[];
   resolve: (answer: string) => void;
@@ -84,10 +88,12 @@ export interface AppProps {
   perms: PermissionEngine;
   client: LlmClient;
   store: SessionStore;
+  /** bridge to a grayskull-web hub, when one is running */
+  link?: CliLink;
 }
 
 export function App(props: AppProps): React.ReactElement {
-  const { cwd, settings, agent, bridge, memory, mcp, perms, client, store } = props;
+  const { cwd, settings, agent, bridge, memory, mcp, perms, client, store, link } = props;
   const { exit } = useApp();
 
   // finished items go to <Static> — printed once, never re-rendered (anti-flicker);
@@ -105,8 +111,22 @@ export function App(props: AppProps): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [busyWhat, setBusyWhat] = useState("");
   const [spin, setSpin] = useState(0);
-  const [pendingPerm, setPendingPerm] = useState<PendingPermission | null>(null);
-  const [pendingAsk, setPendingAsk] = useState<PendingAsk | null>(null);
+  const [pendingPerm, setPendingPermState] = useState<PendingPermission | null>(null);
+  const [pendingAsk, setPendingAskState] = useState<PendingAsk | null>(null);
+  const [hubConnected, setHubConnected] = useState(false);
+  // refs mirror the pending prompts so hub commands (stale closures) can resolve them
+  const pendingPermRef = useRef<PendingPermission | null>(null);
+  const pendingAskRef = useRef<PendingAsk | null>(null);
+  const reqCounterRef = useRef(0);
+  const itemsRef = useRef<TranscriptItem[]>([]);
+  const setPendingPerm = (p: PendingPermission | null) => {
+    pendingPermRef.current = p;
+    setPendingPermState(p);
+  };
+  const setPendingAsk = (a: PendingAsk | null) => {
+    pendingAskRef.current = a;
+    setPendingAskState(a);
+  };
   const [memFlash, setMemFlash] = useState("");
   const [, forceRender] = useState(0);
 
@@ -121,6 +141,11 @@ export function App(props: AppProps): React.ReactElement {
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pushItem = (item: TranscriptItem) => {
+    link?.publish({ t: "item", item });
+    if (item.type !== "tool" || item.state !== "running") {
+      itemsRef.current.push(item);
+      if (itemsRef.current.length > 300) itemsRef.current.shift();
+    }
     // tool items arrive twice (running → done): keep running ones in the
     // dynamic region, finalize into <Static> when they complete
     if (item.type === "tool") {
@@ -141,6 +166,39 @@ export function App(props: AppProps): React.ReactElement {
     if (m === "kamikazeee") {
       pushItem({ type: "banner", text: KAMIKAZEEE_BANNER + "\n" + KAMIKAZEEE_WARNING, color: "red" });
     }
+    publishStatus();
+  };
+
+  const publishStatus = () => {
+    link?.publish({
+      t: "status",
+      mode: perms.mode,
+      busy: runningRef.current,
+      ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
+      mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
+      model: settings.model,
+    });
+  };
+
+  const publishMemory = () => {
+    link?.publish({ t: "memory", global: loadGlobalMemory(), local: loadLocalMemory(cwd) });
+  };
+
+  const resolvePerm = (answer: "yes" | "always" | "no") => {
+    const p = pendingPermRef.current;
+    if (!p) return;
+    setPendingPerm(null);
+    link?.publish({ t: "perm_done", reqId: p.reqId });
+    p.resolve(answer);
+  };
+
+  const resolveAsk = (answer: string) => {
+    const a = pendingAskRef.current;
+    if (!a) return;
+    setPendingAsk(null);
+    pushItem({ type: "ask", question: a.question, answer });
+    link?.publish({ t: "ask_done", reqId: a.reqId });
+    a.resolve(answer);
   };
 
   // wire the bridge the agent talks to
@@ -148,6 +206,7 @@ export function App(props: AppProps): React.ReactElement {
     bridge.pushItem = pushItem;
     bridge.assistantDelta = (delta) => {
       streamRef.current += delta;
+      link?.publish({ t: "delta", text: delta });
       // throttle: flushing every token redraws the live region too often
       if (!flushTimerRef.current) {
         flushTimerRef.current = setTimeout(() => {
@@ -157,6 +216,7 @@ export function App(props: AppProps): React.ReactElement {
       }
     };
     bridge.reasoningDelta = (delta) => {
+      link?.publish({ t: "reasoning", text: delta });
       // show the think-stream dimmed while it runs; it is not kept
       reasonRef.current = (reasonRef.current + delta).slice(-600);
       setStreamReason(reasonRef.current);
@@ -171,22 +231,81 @@ export function App(props: AppProps): React.ReactElement {
       }
       setStreamText("");
       setStreamReason("");
+      link?.publish({ t: "stream_end" });
       if (text.trim()) pushItem({ type: "assistant", text });
     };
     bridge.requestPermission = (req) =>
-      new Promise((resolve) => setPendingPerm({ req, resolve }));
+      new Promise((resolve) => {
+        const reqId = `p${++reqCounterRef.current}`;
+        setPendingPerm({ reqId, req, resolve });
+        link?.publish({ t: "perm_req", reqId, detail: req.detail, preview: req.preview ?? null });
+      });
     bridge.askUser = (question, options) =>
-      new Promise((resolve) => setPendingAsk({ question, options, resolve }));
+      new Promise((resolve) => {
+        const reqId = `a${++reqCounterRef.current}`;
+        setPendingAsk({ reqId, question, options, resolve });
+        link?.publish({ t: "ask_req", reqId, question, options: options ?? null });
+      });
     bridge.setBusy = (b, what) => {
       setBusy(b);
       setBusyWhat(what ?? "");
+      link?.publish({ t: "busy", busy: b, what: what ?? "" });
+      publishStatus();
     };
     memory.onUpdate = (scope) => {
       setMemFlash(scope === "global" ? "⚡ global memory" : "✦ memory");
       setTimeout(() => setMemFlash(""), 4000);
+      publishMemory();
     };
     memory.onNote = (text) => pushItem({ type: "note", text });
-    mcp.onChange = () => forceRender((n) => n + 1);
+    mcp.onChange = () => {
+      forceRender((n) => n + 1);
+      publishStatus();
+    };
+
+    // grayskull-web hub: register, mirror, accept remote control
+    if (link) {
+      link.getRegistration = () => ({ cwd, mode: perms.mode, items: itemsRef.current });
+      link.onStateChange = (connected) => {
+        setHubConnected(connected);
+        if (connected) {
+          publishStatus();
+          publishMemory();
+        }
+      };
+      link.onCommand = (msg) => {
+        switch (msg["t"]) {
+          case "prompt": {
+            const text = String(msg["text"] ?? "").trim();
+            if (text) {
+              pushItem({ type: "note", text: "⇄ prompt from web" });
+              submitToAgent(text);
+            }
+            break;
+          }
+          case "mode":
+            if ((MODE_ORDER as string[]).includes(String(msg["mode"]))) {
+              setMode(String(msg["mode"]) as PermissionMode);
+            }
+            break;
+          case "interrupt":
+            agent.stop();
+            break;
+          case "answer": {
+            const reqId = String(msg["reqId"] ?? "");
+            const value = String(msg["value"] ?? "");
+            // "always" allowlisting happens in the loop's decide callback
+            if (pendingPermRef.current?.reqId === reqId && ["yes", "always", "no"].includes(value)) {
+              resolvePerm(value as "yes" | "always" | "no");
+            } else if (pendingAskRef.current?.reqId === reqId && value) {
+              resolveAsk(value);
+            }
+            break;
+          }
+        }
+      };
+      link.start();
+    }
   }, []);
 
   useEffect(() => {
@@ -284,16 +403,9 @@ export function App(props: AppProps): React.ReactElement {
     // permission prompt steals the keyboard
     if (pendingPerm) {
       const c = char.toLowerCase();
-      if (c === "y" || key.return) {
-        pendingPerm.resolve("yes");
-        setPendingPerm(null);
-      } else if (c === "a") {
-        pendingPerm.resolve("always");
-        setPendingPerm(null);
-      } else if (c === "n" || key.escape) {
-        pendingPerm.resolve("no");
-        setPendingPerm(null);
-      }
+      if (c === "y" || key.return) resolvePerm("yes");
+      else if (c === "a") resolvePerm("always");
+      else if (c === "n" || key.escape) resolvePerm("no");
       return;
     }
 
@@ -335,12 +447,9 @@ export function App(props: AppProps): React.ReactElement {
 
     // ask_user: digits pick an option, otherwise the typed text is the answer
     if (pendingAsk && pendingAsk.options && /^[1-9]$/.test(char) && input === "") {
-      const idx = Number(char) - 1;
-      const opt = pendingAsk.options[idx];
+      const opt = pendingAsk.options[Number(char) - 1];
       if (opt) {
-        pushItem({ type: "ask", question: pendingAsk.question, answer: opt });
-        pendingAsk.resolve(opt);
-        setPendingAsk(null);
+        resolveAsk(opt);
         return;
       }
     }
@@ -349,9 +458,7 @@ export function App(props: AppProps): React.ReactElement {
       if (pendingAsk) {
         const answer = input.trim();
         if (!answer) return;
-        pushItem({ type: "ask", question: pendingAsk.question, answer });
-        pendingAsk.resolve(answer);
-        setPendingAsk(null);
+        resolveAsk(answer);
         setInput("");
         return;
       }
@@ -470,6 +577,7 @@ export function App(props: AppProps): React.ReactElement {
           <Text dimColor> shift+tab</Text>
         </Text>
         <Text dimColor>
+          {hubConnected ? "⇄ web · " : ""}
           {chainChip ? (
             <Text color="magenta">{chainChip}{" · "}</Text>
           ) : null}

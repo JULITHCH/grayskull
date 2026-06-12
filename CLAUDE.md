@@ -58,6 +58,11 @@ rendered dimmed, never scanned for tool calls.
   bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask
   maps). Agent-mesh events come from the `monitor` callback in `agents/runner.ts`.
   Frontend is one self-contained ui.html (vanilla JS, matrix rain, SVG node graph).
+  `clilink.ts`: the TUI dials ws://127.0.0.1:4242/cli (10s silent retry), registers
+  with a transcript snapshot, mirrors all bridge events and accepts remote commands
+  (prompt/mode/interrupt/answer); the server's /cli endpoint stores CliSession state
+  and routes browser commands by sid. Perm/ask prompts carry reqIds; perm_done/
+  ask_done broadcasts close the losing UI's dialog.
 
 ## Conventions
 

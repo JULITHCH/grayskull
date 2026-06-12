@@ -264,6 +264,8 @@ function handle(m) {
     case "agent": agentEvent(m.sid, m.ev); break;
     case "perm_req": S.pendingPerm = m; showPerm(); break;
     case "ask_req": S.pendingAsk = m; showAsk(); break;
+    case "perm_done": if (S.pendingPerm?.reqId === m.reqId) { S.pendingPerm = null; closeModal("permModalBg"); } break;
+    case "ask_done": if (S.pendingAsk?.reqId === m.reqId) { S.pendingAsk = null; closeModal("askModalBg"); } break;
     case "error": toast(m.text); break;
   }
 }
@@ -274,7 +276,7 @@ function renderSessions() {
   $("sessionList").innerHTML = S.sessions.map((s) => {
     const st = S.status[s.sid] ?? {};
     return `<div class="sess ${s.sid === S.current ? "active" : ""}" onclick="selectSession('${s.sid}')">
-      <div class="sid">${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}</div>
+      <div class="sid">${s.origin === "cli" ? "⌨ " : ""}${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}</div>
       <div class="cwd">${esc(s.cwd)}</div></div>`;
   }).join("");
 }

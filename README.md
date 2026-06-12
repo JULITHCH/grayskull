@@ -273,6 +273,14 @@ WebSockets, zero frontend build):
   matrix rain included
 - digital rain + CRT scanlines, session replay on reconnect, esc interrupts
 
+**CLI sessions join the hub.** Every terminal `grayskull` automatically connects to a
+running grayskull-web (retrying quietly in the background, `⇄ web` in the statusline
+when linked) and shows up in the session list with a ⌨ badge. From the browser you can
+read its live transcript, send prompts, switch modes (incl. KAMIKAZEEE), answer
+permission/ask dialogs and interrupt — while the terminal stays fully usable; both UIs
+mirror each other in real time, and a prompt answered in one closes the dialog in the
+other. Hub URL override: `GRAYSKULL_HUB=ws://host:4242/cli`.
+
 No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
 
 ## Context management
