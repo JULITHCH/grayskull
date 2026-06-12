@@ -57,6 +57,7 @@ in settings flips it via `chat_template_kwargs`).
 |---|---|
 | `shift+tab` | cycle permission modes |
 | `@` | fzf file picker — inserts the picked path into your prompt |
+| `↑` / `↓` | browse previous prompts (shell-style, persisted per project) |
 | `esc` | interrupt the running turn / chain step |
 | `1`-`9` | answer a model question by picking an option |
 | `y` / `a` / `n` | permission prompt: yes / always this session / no |

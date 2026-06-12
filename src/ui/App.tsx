@@ -17,6 +17,36 @@ import type { ChainDef, ChainContextMode } from "../chains/registry";
 import { renderMarkdown } from "./markdown";
 import { pickFile } from "./external";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
+import { localDir } from "../config/paths";
+import { readFileSync, appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+const HISTORY_MAX = 200;
+
+function historyPath(cwd: string): string {
+  return join(localDir(cwd), "prompt-history.txt");
+}
+
+function loadPromptHistory(cwd: string): string[] {
+  try {
+    if (!existsSync(historyPath(cwd))) return [];
+    return readFileSync(historyPath(cwd), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.replace(/\\n/g, "\n"))
+      .slice(-HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function appendPromptHistory(cwd: string, text: string): void {
+  try {
+    appendFileSync(historyPath(cwd), text.replace(/\n/g, "\\n") + "\n");
+  } catch {
+    // history must never break the session
+  }
+}
 
 const MODE_STYLE: Record<PermissionMode, { label: string; color: string }> = {
   normal: { label: "normal", color: "gray" },
@@ -76,6 +106,10 @@ export function App(props: AppProps): React.ReactElement {
   const reasonRef = useRef("");
   const queueRef = useRef<QueuedWork[]>([]);
   const runningRef = useRef(false);
+  // shell-style prompt history (persisted per project)
+  const historyRef = useRef<string[]>(loadPromptHistory(cwd));
+  const histIdxRef = useRef<number | null>(null);
+  const draftRef = useRef("");
 
   const pushItem = (item: TranscriptItem) => {
     setItems((prev) => {
@@ -182,6 +216,13 @@ export function App(props: AppProps): React.ReactElement {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    histIdxRef.current = null;
+    draftRef.current = "";
+    if (historyRef.current[historyRef.current.length - 1] !== text) {
+      historyRef.current.push(text);
+      if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
+      appendPromptHistory(cwd, text);
+    }
 
     if (text.startsWith("/")) {
       const ctx: CommandContext = {
@@ -247,6 +288,31 @@ export function App(props: AppProps): React.ReactElement {
 
     if (key.escape) {
       if (busy) agent.stop();
+      return;
+    }
+
+    // shell-style history: up = older, down = newer, past newest = your draft
+    if (key.upArrow) {
+      const hist = historyRef.current;
+      if (hist.length === 0) return;
+      if (histIdxRef.current === null) {
+        draftRef.current = input;
+        histIdxRef.current = hist.length - 1;
+      } else if (histIdxRef.current > 0) {
+        histIdxRef.current--;
+      }
+      setInput(hist[histIdxRef.current] ?? "");
+      return;
+    }
+    if (key.downArrow) {
+      if (histIdxRef.current === null) return;
+      if (histIdxRef.current < historyRef.current.length - 1) {
+        histIdxRef.current++;
+        setInput(historyRef.current[histIdxRef.current] ?? "");
+      } else {
+        histIdxRef.current = null;
+        setInput(draftRef.current);
+      }
       return;
     }
 
