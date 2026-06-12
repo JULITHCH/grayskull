@@ -239,6 +239,18 @@ Two ways to fire one:
 
 `/skills` lists everything found.
 
+**Skill packs** drop straight in — e.g. the official PixiJS collection (26 skills with a
+router skill that dispatches to specialists, from https://pixijs.com/llms) is installed:
+
+```sh
+git clone --depth 1 https://github.com/pixijs/pixijs-skills /tmp/ps \
+  && cp -r /tmp/ps/skills/* ~/.config/grayskull/skills/ && rm -rf /tmp/ps
+```
+
+On code tasks the model routes itself: `skill(pixijs) → pixijs-application →
+pixijs-scene-sprite → …` before writing. Long pack descriptions are capped at 220 chars
+in the system-prompt listing; the full body loads on invocation.
+
 ## Thinking chains — /thinkingchain (alias /tc)
 
 Named, reusable step pipelines the model is walked through in order — structure the

@@ -211,7 +211,7 @@ export class GrayskullAgent {
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",
         skills
-          ? `# Available skills\nWhen a request matches one of these, call the skill tool with its name BEFORE doing the task, then follow the returned instructions.\n${skills}`
+          ? `# Available skills\nIf the request involves a topic listed below, you MUST call the skill tool with that skill's name BEFORE writing any code or answer — treat your own memory of these libraries as outdated. Then follow the returned instructions.\n${skills}`
           : "",
       ]
         .filter(Boolean)

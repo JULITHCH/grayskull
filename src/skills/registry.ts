@@ -114,7 +114,11 @@ export function loadSkills(cwd: string): SkillDef[] {
 export function skillListing(cwd: string): string {
   const skills = loadSkills(cwd);
   if (skills.length === 0) return "";
-  return skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
+  // official skill packs ship very long descriptions — cap them so 25+ skills
+  // don't eat the context window every turn (the body loads on invocation)
+  return skills
+    .map((s) => `- ${s.name}: ${s.description.replace(/\s+/g, " ").slice(0, 220)}`)
+    .join("\n");
 }
 
 /** The message sent to the model when a skill fires (tool call or /name). */
