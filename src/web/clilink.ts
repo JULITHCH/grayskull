@@ -53,9 +53,11 @@ export class CliLink {
       this.ws = ws;
       ws.onopen = () => {
         this.connected = true;
-        this.onStateChange(true);
+        // register FIRST — the hub drops messages from unregistered sockets,
+        // and onStateChange handlers publish status/memory immediately
         const reg = this.getRegistration();
         ws.send(JSON.stringify({ t: "register", ...reg }));
+        this.onStateChange(true);
       };
       ws.onmessage = (e) => {
         try {
