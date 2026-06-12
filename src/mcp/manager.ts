@@ -105,6 +105,12 @@ function mcpToolDef(
       }
       let out = parts.join("\n");
       if (out.length > 30_000) out = out.slice(0, 30_000) + "\n[truncated]";
+      // harness nudge: search results are snippets, not knowledge — push the
+      // model to fetch. Far more reliable than a system-prompt rule alone.
+      if (server === "searxng" && /search/i.test(toolName) && out.includes("http")) {
+        out +=
+          "\n\n[These are only search snippets. Before drawing conclusions, fetch the 1-3 most relevant URLs above with mcp__searxng__web_url_read and read the actual pages.]";
+      }
       return out || "(empty result)";
     },
   };

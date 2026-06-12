@@ -131,11 +131,11 @@ const GATE_SUFFIX = `\nThis step is a quality gate. End your response with exact
 
 const WEBSEARCH_ADDENDUM = `\nUse the web for this step: search with mcp__searxng__searxng_web_search, then fetch the 1-3 most promising results with mcp__searxng__web_url_read. Base conclusions on fetched page content, not snippets.`;
 
+const RESEARCH_STEP = `Research the task on the web. Search with mcp__searxng__searxng_web_search for the key technologies, APIs and prior art involved, then FETCH the 2-3 most promising result URLs with mcp__searxng__web_url_read — searching alone is NOT research, the snippets are not enough. Report only findings from the fetched pages that matter for this task: versions, API signatures, known pitfalls, examples.`;
+
 export const BUILTIN_STEPS: Record<string, string> = {
-  websearch:
-    "Research the task on the web. Search for the key technologies, APIs and prior art involved; fetch the most relevant pages. Report only findings that matter for this task: versions, API signatures, known pitfalls, examples.",
-  research:
-    "Research the task on the web. Search for the key technologies, APIs and prior art involved; fetch the most relevant pages. Report only findings that matter for this task: versions, API signatures, known pitfalls, examples.",
+  websearch: RESEARCH_STEP,
+  research: RESEARCH_STEP,
   plan:
     "Write a concrete, numbered implementation plan for the task: which files to create or change and how, in what order, and what could go wrong. Use earlier step findings. Do NOT write the implementation yet. If something essential is unknown, ask the user now with ask_user.",
   review:
