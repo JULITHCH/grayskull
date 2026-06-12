@@ -27,11 +27,16 @@ export const SettingsSchema = z.object({
   baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
   model: z.string().default("happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound"),
-  contextWindow: z.number().default(131072),
+  contextWindow: z.number().default(196608),
   maxTokens: z.number().default(32768),
-  temperature: z.number().default(0.6),
-  topP: z.number().default(0.95),
+  // Qwen non-thinking coding preset
+  temperature: z.number().default(0.7),
+  topP: z.number().default(0.8),
   topK: z.number().default(20),
+  presencePenalty: z.number().default(0),
+  repetitionPenalty: z.number().default(1.0),
+  /** chat_template_kwargs.enable_thinking — server runs --reasoning-parser qwen3 */
+  enableThinking: z.boolean().default(false),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),
   defaultMode: z.enum(["normal", "accept-edits", "plan", "kamikazeee"]).default("normal"),
   editor: z.string().optional(),
@@ -43,8 +48,23 @@ export const SettingsSchema = z.object({
       maxTokens: z.number().default(3000),
       /** extra trigger phrases for global memory, merged with built-ins */
       globalTriggers: z.array(z.string()).default([]),
+      /** brain-like scoring: decay + reinforcement + spreading activation */
+      scoring: z.boolean().default(true),
+      halfLifeDays: z.number().min(0.1).default(7),
+      spreadFactor: z.number().min(0).max(1).default(0.25),
+      pruneThreshold: z.number().min(0).max(1).default(0.15),
+      reviveThreshold: z.number().min(0).max(1).default(0.55),
     })
-    .default({ enabled: true, maxTokens: 3000, globalTriggers: [] }),
+    .default({
+      enabled: true,
+      maxTokens: 3000,
+      globalTriggers: [],
+      scoring: true,
+      halfLifeDays: 7,
+      spreadFactor: 0.25,
+      pruneThreshold: 0.15,
+      reviveThreshold: 0.55,
+    }),
   permissions: z
     .object({
       allow: z.array(z.string()).default([]),

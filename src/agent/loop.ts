@@ -23,6 +23,8 @@ export interface UiBridge {
   pushItem: (item: TranscriptItem) => void;
   /** stream delta into the current assistant message */
   assistantDelta: (delta: string) => void;
+  /** stream delta of the model's reasoning (rendered dimmed, not kept) */
+  reasoningDelta: (delta: string) => void;
   assistantDone: () => void;
   requestPermission: (req: PermissionRequest) => Promise<"yes" | "always" | "no">;
   askUser: (question: string, options?: string[]) => Promise<string>;
@@ -38,6 +40,7 @@ export async function runToolLoop(opts: {
   ctx: ToolContext;
   signal?: AbortSignal;
   onTextDelta?: (d: string) => void;
+  onReasoningDelta?: (d: string) => void;
   onAssistantDone?: (text: string) => void;
   onToolEvent?: (item: TranscriptItem & { type: "tool" }) => void;
   /** null = auto-approve everything (sub-agents gate at spawn time) */
@@ -50,7 +53,12 @@ export async function runToolLoop(opts: {
 
   for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
     if (signal?.aborted) break;
-    const result = await client.complete(messages, schemas, { onTextDelta: opts.onTextDelta }, signal);
+    const result = await client.complete(
+      messages,
+      schemas,
+      { onTextDelta: opts.onTextDelta, onReasoningDelta: opts.onReasoningDelta },
+      signal,
+    );
     let { toolCalls } = result;
     lastText = result.text;
     opts.onAssistantDone?.(result.text);
@@ -311,6 +319,7 @@ export class GrayskullAgent {
       ctx,
       signal,
       onTextDelta: (d) => this.ui.assistantDelta(d),
+      onReasoningDelta: (d) => this.ui.reasoningDelta(d),
       onAssistantDone: (text) => {
         this.ui.assistantDone();
         if (text) turnLog.push(`assistant: ${text.slice(0, 4000)}`);

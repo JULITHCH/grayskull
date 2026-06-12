@@ -3,6 +3,7 @@ import { GLOBAL_MEMORY, localMemory } from "../config/paths";
 import type { Settings } from "../config/settings";
 import type { LlmClient } from "../llm/client";
 import { estimateTokens } from "../llm/client";
+import { scoreTurn, renderScored, type ScoringConfig } from "./scores";
 
 /** Built-in trigger phrases that route a fact to the GLOBAL vault. */
 const GLOBAL_TRIGGERS = [
@@ -35,16 +36,15 @@ export function saveLocalMemory(cwd: string, content: string): void {
   writeFileSync(localMemory(cwd), content.trim() + "\n");
 }
 
-const EMPTY_LOCAL = `## Project facts
+export const MEMORY_SECTIONS = [
+  "Project facts",
+  "Domain knowledge",
+  "Decisions",
+  "User answers",
+  "Gotchas",
+];
 
-## Domain knowledge
-
-## Decisions
-
-## User answers
-
-## Gotchas
-`;
+const EMPTY_LOCAL = MEMORY_SECTIONS.map((s) => `## ${s}\n`).join("\n");
 
 const EXTRACT_SYSTEM = `You maintain the persistent project memory of a coding agent. You receive the CURRENT MEMORY and the latest conversation TURN. Return the COMPLETE UPDATED MEMORY file, markdown, with exactly these sections:
 
@@ -76,6 +76,18 @@ export class MemoryManager {
   private extracting = false;
   /** UI hook — fired when a memory file changes, so the statusline can flash. */
   onUpdate?: (scope: "global" | "local") => void;
+  /** UI hook — transcript notes (revived/archived memories). */
+  onNote?: (text: string) => void;
+
+  private scoringCfg(): ScoringConfig {
+    const m = this.settings.memory;
+    return {
+      halfLifeDays: m.halfLifeDays,
+      spreadFactor: m.spreadFactor,
+      pruneThreshold: m.pruneThreshold,
+      reviveThreshold: m.reviveThreshold,
+    };
+  }
 
   constructor(cwd: string, settings: Settings, client: LlmClient) {
     this.cwd = cwd;
@@ -83,10 +95,26 @@ export class MemoryManager {
     this.client = client;
   }
 
-  /** Both memories rendered for system-prompt injection. */
+  /** Both memories rendered for system-prompt injection. Project memory is
+   *  score-ordered (strongest first) and budget-capped by dropping the
+   *  weakest bullets; the file on disk is untouched. */
   render(): string {
     const g = loadGlobalMemory();
-    const l = loadLocalMemory(this.cwd);
+    let l = loadLocalMemory(this.cwd);
+    if (l && this.settings.memory.scoring) {
+      try {
+        l = renderScored({
+          cwd: this.cwd,
+          memoryMd: l,
+          cfg: this.scoringCfg(),
+          sections: MEMORY_SECTIONS,
+          maxTokens: this.settings.memory.maxTokens,
+          estimateTokens,
+        });
+      } catch {
+        // scoring must never break injection — fall back to the raw file
+      }
+    }
     let out = "";
     if (g) out += `# MEMORY (global — applies to all projects)\n${g}\n\n`;
     if (l) out += `# MEMORY (this project)\n${l}\n`;
@@ -116,11 +144,31 @@ export class MemoryManager {
         }
         saveLocalMemory(this.cwd, updated);
         this.onUpdate?.("local");
+        this.runScoring(updated, turnSummary);
       }
     } catch {
       // memory extraction must never break the session
     } finally {
       this.extracting = false;
+    }
+  }
+
+  /** Post-turn brain pass: reinforce fired memories, spread activation to
+   *  neighbors, archive faded ones, revive archived ones the turn matched. */
+  private runScoring(memoryMd: string, turnSummary: string): void {
+    if (!this.settings.memory.scoring) return;
+    try {
+      const { notes } = scoreTurn({
+        cwd: this.cwd,
+        memoryMd,
+        turnText: turnSummary,
+        cfg: this.scoringCfg(),
+        sections: MEMORY_SECTIONS,
+        saveMemory: (md) => saveLocalMemory(this.cwd, md),
+      });
+      for (const note of notes) this.onNote?.(note);
+    } catch {
+      // scoring must never break the session
     }
   }
 

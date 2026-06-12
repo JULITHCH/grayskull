@@ -4,6 +4,8 @@ import type { ChatMessage, ToolCall, Usage } from "../types";
 
 export interface StreamCallbacks {
   onTextDelta?: (delta: string) => void;
+  /** --reasoning-parser qwen3 streams think-block tokens separately */
+  onReasoningDelta?: (delta: string) => void;
 }
 
 export interface CompletionResult {
@@ -83,8 +85,8 @@ export class LlmClient {
               })),
             }
           : {}),
-        // vLLM extension, passed through the OpenAI client untyped
-        ...({ top_k: s.topK } as unknown as Record<string, never>),
+        // vLLM extensions, passed through the OpenAI client untyped
+        ...(this.vllmExtras() as Record<string, never>),
       },
       { signal },
     );
@@ -97,6 +99,15 @@ export class LlmClient {
     for await (const chunk of stream) {
       const choice = chunk.choices?.[0];
       const delta = choice?.delta;
+      // qwen3 reasoning parser: think tokens arrive in a separate field
+      // ("reasoning" on current vLLM, "reasoning_content" on older builds);
+      // content stays empty until the think block closes — never treat that
+      // as an empty reply and never scan it for tool calls
+      const d = delta as Record<string, unknown> | undefined;
+      const reasoning = d?.["reasoning"] ?? d?.["reasoning_content"];
+      if (typeof reasoning === "string" && reasoning) {
+        callbacks.onReasoningDelta?.(reasoning);
+      }
       if (delta?.content) {
         text += delta.content;
         callbacks.onTextDelta?.(delta.content);
@@ -139,8 +150,19 @@ export class LlmClient {
       ],
       temperature: 0.3,
       max_tokens: maxTokens,
-      ...({ top_k: this.settings.topK } as unknown as Record<string, never>),
+      ...(this.vllmExtras() as Record<string, never>),
     });
     return res.choices[0]?.message?.content ?? "";
+  }
+
+  /** vLLM-specific request fields the OpenAI client doesn't type. */
+  private vllmExtras(): Record<string, unknown> {
+    const s = this.settings;
+    return {
+      top_k: s.topK,
+      presence_penalty: s.presencePenalty,
+      repetition_penalty: s.repetitionPenalty,
+      chat_template_kwargs: { enable_thinking: s.enableThinking },
+    };
   }
 }

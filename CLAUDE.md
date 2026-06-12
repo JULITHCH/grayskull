@@ -2,6 +2,11 @@
 
 TypeScript + Ink 7 + Bun. Targets the Spark vLLM endpoint (`http://10.8.0.22:8000/v1`,
 model `happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound`, key from `$LMSTUDIO_API_KEY`).
+Server runs `--tool-call-parser qwen3_xml --reasoning-parser qwen3 --max-model-len 196608`
+(spark-vllm-docker `qwen3.5-122b-heretic` recipe, --solo). Defaults follow the Qwen
+non-thinking coding preset: temp 0.7, topP 0.8, topK 20; `enableThinking` off, toggled
+via `chat_template_kwargs`. Reasoning deltas (`reasoning_content`) stream separately —
+rendered dimmed, never scanned for tool calls.
 
 ## Commands
 
@@ -23,6 +28,11 @@ model `happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound`, key from `$LMSTUD
 - `memory/memory.ts` — global vault `~/.config/grayskull/GRAYSKULL.md` (explicit
   "always remember" trigger or `/remember` only) + per-project `.grayskull/memory.md`
   (auto-extracted after every turn via `client.oneShot`, fire-and-forget).
+- `memory/scores.ts` — ACT-R-style activation scoring for project memory: exponential
+  decay (half-life), reinforcement of bullets "fired" by a turn (lexical containment),
+  spreading activation to similar neighbors, prune-to-archive + revival. Sidecar
+  `.grayskull/memory-scores.json` keyed by bullet-text hash; memory.md stays the
+  source of truth. Pure code, no LLM; global vault exempt.
 - `mcp/manager.ts` — official MCP SDK; searxng (`npx -y mcp-searxng`, SEARXNG_URL
   :8080) is a built-in always-on default merged in `config/settings.ts`.
 - `agents/` — sub-agent defs as frontmatter-md in `.grayskull/agents/` + global dir;

@@ -31,13 +31,23 @@ and seeds the project memory.
 
 ```sh
 vllm serve happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound \
-  --enable-auto-tool-choice --tool-call-parser hermes \
   --enable-prefix-caching \
-  --max-model-len 131072
+  --enable-auto-tool-choice --tool-call-parser qwen3_xml \
+  --reasoning-parser qwen3 \
+  --chat-template unsloth.jinja \
+  --max-model-len 196608
 ```
 
+Canonical launch is the spark-vllm-docker `qwen3.5-122b-heretic` recipe (`--solo` mode),
+which adds the infra flags: `--load-format fastsafetensors`,
+`--gpu-memory-utilization 0.76`, `-tp 1`, `--max-num-batched-tokens 8192`,
+`--trust-remote-code`.
+
 `--enable-prefix-caching` matters: grayskull keeps the system prompt + memory as a stable
-prefix, so every turn after the first reuses the KV cache.
+prefix, so every turn after the first reuses the KV cache. `--reasoning-parser qwen3`
+splits think-blocks into a separate stream — grayskull renders them dimmed and never
+parses tool calls out of them; thinking is off by default (`"enableThinking": false`
+in settings flips it via `chat_template_kwargs`).
 
 ---
 
@@ -99,11 +109,27 @@ user answers, gotchas. Capped (~3k tokens, configurable); compresses itself when
 knowledge (API signatures, versions, config syntax) is distilled into project memory —
 so the model doesn't re-search the same things next time.
 
+**Brain-like scoring** (project memory only): every fact carries an activation score
+modeled on human memory (ACT-R style):
+
+- **decay** — scores halve every `halfLifeDays` (default 7) without use (forgetting curve)
+- **reinforcement** — facts a turn actually touches get `+1` (capped at 3)
+- **spreading activation** — the top-3 lexically similar neighbors of a used fact get a
+  smaller boost too (`spreadFactor`, default 0.25): related knowledge stays warm
+- **archive, not delete** — facts fading below `pruneThreshold` (0.15) move to
+  `.grayskull/memory-archive.md`; if a later turn strongly matches an archived fact
+  (`reviveThreshold` 0.55) it is **revived** at medium strength — forgotten, not destroyed
+- strongest facts are injected first; over the token budget the weakest are dropped from
+  the prompt (the file keeps them)
+- the global vault is **exempt** — "always remember" never decays
+- kill switch: `"memory": { "scoring": false }`
+
 Both memories are injected into the system prompt every turn and survive context
 compaction — that's what makes compaction safe.
 
 ```
-/memory                # show both
+/memory                # show both, with activation scores
+/memory archive        # show faded (archived) facts
 /memory edit [global]  # open in $EDITOR
 /remember <fact>       # write to the global vault
 /forget <pattern>      # prune project memory lines
@@ -114,10 +140,11 @@ compaction — that's what makes compaction safe.
 Precedence: built-in defaults < `~/.config/grayskull/settings.json` <
 `./.grayskull/settings.json`. Edit with `/settings` (global) or `/settings local`.
 
-Covers: `baseURL`, `model`, `apiKeyEnv`, `contextWindow`, `maxTokens`, sampling
-(`temperature`, `topP`, `topK`), `compactThreshold`, `defaultMode`, `editor`,
-`agentConcurrency`, `memory` (enabled / maxTokens / extra globalTriggers),
-`permissions` (allow/deny), `mcpServers`.
+Covers: `baseURL`, `model`, `apiKeyEnv`, `contextWindow` (196608), `maxTokens`, sampling
+(`temperature` 0.7, `topP` 0.8, `topK` 20, `presencePenalty`, `repetitionPenalty` — the
+Qwen non-thinking coding preset), `enableThinking`, `compactThreshold`, `defaultMode`,
+`editor`, `agentConcurrency`, `memory` (enabled / maxTokens / globalTriggers / scoring
+knobs), `permissions` (allow/deny), `mcpServers`.
 
 **System prompt**: `/system` opens the global one (`~/.config/grayskull/system-prompt.md`)
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
@@ -210,7 +237,7 @@ model can't impose on itself:
 ## Context management
 
 - Live `ctx %` in the statusline (real prompt-token usage from vLLM).
-- Auto-compaction at 70% of the 131k window (configurable `compactThreshold`): older
+- Auto-compaction at 70% of the 196k window (configurable `compactThreshold`): older
   turns are summarized by the model into a briefing, recent turns stay verbatim,
   memory files are untouched. Manual: `/compact`.
 

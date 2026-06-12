@@ -44,6 +44,7 @@ const store = new SessionStore(cwd);
 const bridge: UiBridge = {
   pushItem: () => {},
   assistantDelta: () => {},
+  reasoningDelta: () => {},
   assistantDone: () => {},
   requestPermission: async () => "no",
   askUser: async () => "",

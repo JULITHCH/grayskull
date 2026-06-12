@@ -61,6 +61,7 @@ export function App(props: AppProps): React.ReactElement {
 
   const [items, setItems] = useState<TranscriptItem[]>([]);
   const [streamText, setStreamText] = useState("");
+  const [streamReason, setStreamReason] = useState("");
   const [input, setInput] = useState("");
   const [mode, setModeState] = useState<PermissionMode>(perms.mode);
   const [busy, setBusy] = useState(false);
@@ -72,6 +73,7 @@ export function App(props: AppProps): React.ReactElement {
   const [, forceRender] = useState(0);
 
   const streamRef = useRef("");
+  const reasonRef = useRef("");
   const queueRef = useRef<QueuedWork[]>([]);
   const runningRef = useRef(false);
 
@@ -107,10 +109,17 @@ export function App(props: AppProps): React.ReactElement {
       streamRef.current += delta;
       setStreamText(streamRef.current);
     };
+    bridge.reasoningDelta = (delta) => {
+      // show the think-stream dimmed while it runs; it is not kept
+      reasonRef.current = (reasonRef.current + delta).slice(-600);
+      setStreamReason(reasonRef.current);
+    };
     bridge.assistantDone = () => {
       const text = streamRef.current;
       streamRef.current = "";
+      reasonRef.current = "";
       setStreamText("");
+      setStreamReason("");
       if (text.trim()) pushItem({ type: "assistant", text });
     };
     bridge.requestPermission = (req) =>
@@ -125,6 +134,7 @@ export function App(props: AppProps): React.ReactElement {
       setMemFlash(scope === "global" ? "⚡ global memory" : "✦ memory");
       setTimeout(() => setMemFlash(""), 4000);
     };
+    memory.onNote = (text) => pushItem({ type: "note", text });
     mcp.onChange = () => forceRender((n) => n + 1);
   }, []);
 
@@ -324,6 +334,14 @@ export function App(props: AppProps): React.ReactElement {
       {visibleItems.map((item, i) => (
         <TranscriptLine key={items.length - visibleItems.length + i} item={item} />
       ))}
+
+      {streamReason !== "" && streamText === "" && (
+        <Box marginTop={1}>
+          <Text dimColor italic>
+            ∴ {streamReason.split("\n").slice(-4).join("\n")}
+          </Text>
+        </Box>
+      )}
 
       {streamText !== "" && (
         <Box marginTop={1}>

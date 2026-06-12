@@ -3,6 +3,8 @@ import type { Settings } from "../config/settings";
 import type { GrayskullAgent } from "../agent/loop";
 import type { MemoryManager } from "../memory/memory";
 import { loadGlobalMemory, loadLocalMemory, saveLocalMemory } from "../memory/memory";
+import { ScoreStore, bulletHash, archivePath } from "../memory/scores";
+import { readFileSync } from "node:fs";
 import type { McpManager } from "../mcp/manager";
 import type { PermissionEngine } from "../perms/engine";
 import type { SessionStore } from "../session/store";
@@ -94,7 +96,7 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "memory",
-    description: "show memory; /memory edit [global] to edit",
+    description: "show memory (with scores); /memory edit [global] | archive",
     run: async (ctx, args) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       if (parts[0] === "edit") {
@@ -105,9 +107,32 @@ export const COMMANDS: SlashCommand[] = [
         note(ctx, `edited ${path}`);
         return;
       }
+      if (parts[0] === "archive") {
+        const arch = archivePath(ctx.cwd);
+        const content = existsSync(arch) ? readFileSync(arch, "utf8").trim() : "";
+        note(ctx, content || "archive empty — nothing has faded yet");
+        return;
+      }
       const g = loadGlobalMemory() || "(empty)";
-      const l = loadLocalMemory(ctx.cwd) || "(empty)";
-      note(ctx, `# Global (GRAYSKULL.md)\n${g}\n\n# Project (.grayskull/memory.md)\n${l}`);
+      let l = loadLocalMemory(ctx.cwd) || "(empty)";
+      if (l !== "(empty)" && ctx.settings.memory.scoring) {
+        const m = ctx.settings.memory;
+        const store = new ScoreStore(ctx.cwd, {
+          halfLifeDays: m.halfLifeDays,
+          spreadFactor: m.spreadFactor,
+          pruneThreshold: m.pruneThreshold,
+          reviveThreshold: m.reviveThreshold,
+        });
+        l = l
+          .split("\n")
+          .map((line) => {
+            const b = line.match(/^(\s*-\s+)(.+)$/);
+            if (!b) return line;
+            return `${b[1]}(${store.effective(bulletHash(b[2]!)).toFixed(2)}) ${b[2]}`;
+          })
+          .join("\n");
+      }
+      note(ctx, `# Global (GRAYSKULL.md) — never decays\n${g}\n\n# Project (.grayskull/memory.md) — (activation score)\n${l}`);
     },
   },
   {
