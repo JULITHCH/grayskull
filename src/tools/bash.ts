@@ -29,6 +29,8 @@ export const bashTool: ToolDef = {
       });
       let out = "";
       let endReason: "ok" | "timeout" | "interrupted" = "ok";
+      let settled = false;
+      let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
       const killGroup = () => {
         if (child.pid) {
@@ -50,13 +52,11 @@ export const bashTool: ToolDef = {
       };
       ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
-      const collect = (chunk: Buffer) => {
-        if (out.length < MAX_OUTPUT) out += chunk.toString("utf8");
-      };
-      child.stdout.on("data", collect);
-      child.stderr.on("data", collect);
-      child.on("close", (code) => {
+      const settle = (code: number | null, backgroundAlive: boolean) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        if (graceTimer) clearTimeout(graceTimer);
         ctx.signal?.removeEventListener("abort", onAbort);
         let result = out.trim();
         if (out.length >= MAX_OUTPUT) result += "\n[output truncated]";
@@ -64,12 +64,36 @@ export const bashTool: ToolDef = {
           result += `\n[killed: exceeded ${timeout_seconds ?? 120}s timeout. If this was a server or watcher, background it with \`cmd > log 2>&1 &\` instead.]`;
         } else if (endReason === "interrupted") {
           result += "\n[killed: interrupted by user]";
-        } else if (code !== 0) {
+        } else if (code !== 0 && code !== null) {
           result += `\n[exit code ${code}]`;
         }
+        if (backgroundAlive) {
+          result += "\n[a backgrounded process you started is still running]";
+        }
         resolve(result || "(no output)");
+      };
+
+      const collect = (chunk: Buffer) => {
+        if (out.length < MAX_OUTPUT) out += chunk.toString("utf8");
+      };
+      child.stdout.on("data", collect);
+      child.stderr.on("data", collect);
+      // 'close' waits for the stdio pipes — a backgrounded server inherits
+      // them and holds them open forever. Resolve shortly after 'exit'
+      // instead, leaving the background process running as intended.
+      child.on("exit", (code) => {
+        graceTimer = setTimeout(() => {
+          // keep the pipes open (destroying them would EPIPE-kill the
+          // background process on its next write) but discard further output
+          child.stdout.removeListener("data", collect).resume();
+          child.stderr.removeListener("data", collect).resume();
+          settle(code, true);
+        }, 1500);
       });
+      child.on("close", (code) => settle(code, false));
       child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         ctx.signal?.removeEventListener("abort", onAbort);
         resolve(`failed to spawn: ${err.message}`);
