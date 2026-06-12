@@ -47,6 +47,10 @@ rendered dimmed, never scanned for tool calls.
   reuses `agent.runTurn`; fresh mode uses `agent.runIsolated` (no history/memory writes,
   one summary at the end).
 - `config/settings.ts` — zod schema, precedence: defaults < global < local settings.json.
+  Seeded global settings include the playwright MCP server (headless Chrome, 23 tools);
+  the `webtest` skill (examples/skills/, installed at ~/.config/grayskull/skills/)
+  holds the text-only rendering-test playbook (console → snapshot → layout assertions
+  via browser_evaluate → screenshots for the human).
 - `ui/App.tsx` — single-file Ink UI (transcript, custom input, permission/ask prompts,
   statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf.
 

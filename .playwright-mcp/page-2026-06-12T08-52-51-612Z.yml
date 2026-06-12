@@ -1,0 +1,6 @@
+- generic [ref=e2]:
+  - generic [ref=e3]: "404"
+  - heading "Page not found" [level=1] [ref=e4]
+  - paragraph [ref=e5]: The requested page does not exist.
+  - link "← Back to dashboard" [ref=e6] [cursor=pointer]:
+    - /url: /dashboard

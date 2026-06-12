@@ -152,11 +152,17 @@ export function ensureGlobalSystemPrompt(): void {
     writeFileSync(GLOBAL_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT + "\n");
   }
   if (!existsSync(GLOBAL_SETTINGS)) {
-    // Seed an editable global settings file with the schema defaults.
-    writeFileSync(
-      GLOBAL_SETTINGS,
-      JSON.stringify(SettingsSchema.parse({}), null, 2) + "\n",
-    );
+    // Seed an editable global settings file with the schema defaults plus
+    // optional-but-useful servers the user may delete (unlike built-ins).
+    const seed = SettingsSchema.parse({});
+    seed.mcpServers = {
+      playwright: {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@playwright/mcp@latest", "--browser", "chrome", "--headless"],
+      },
+    };
+    writeFileSync(GLOBAL_SETTINGS, JSON.stringify(seed, null, 2) + "\n");
   }
 }
 

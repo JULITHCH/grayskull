@@ -173,6 +173,22 @@ Declared in settings (global or per project):
 Tools appear to the model as `mcp__<server>__<tool>`. `/mcp` shows status,
 `/mcp reconnect <name>` reconnects. Connection failures are reported, never fatal.
 
+## Browser testing (Playwright MCP)
+
+The seeded global settings include a `playwright` MCP server
+(`npx @playwright/mcp --browser chrome --headless`, 23 tools) driving your installed
+Chrome. Delete the entry from settings if you don't want it.
+
+The model has no vision, so rendering issues are caught the text way — the global
+`webtest` skill (`/webtest <url>`, also in `examples/skills/`) encodes the playbook:
+
+1. console errors first (most rendering bugs are JS errors)
+2. accessibility snapshot = structure check
+3. `browser_evaluate` layout assertions: element overflow, sibling overlaps,
+   horizontal scrollbar, zero-size elements — measured in pixels, no eyes needed
+4. interactions (clicks, keys) with re-checks; repeat at mobile width
+5. screenshots saved to `.grayskull/screenshots/` **for the human** — you see what it can't
+
 ## Sub-agents + auto agent creation
 
 Say: *"create an agent that checks for spelling mistakes. iterate through all modules"* —

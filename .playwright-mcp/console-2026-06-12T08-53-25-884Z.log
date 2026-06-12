@@ -1,0 +1,4 @@
+[      15ms] SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at http://localhost:9999/index.html:13:23
+[      19ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://localhost:9999/favicon.ico:0

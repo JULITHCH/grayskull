@@ -1,0 +1,35 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - navigation [ref=e3]:
+      - link "About" [ref=e4] [cursor=pointer]:
+        - /url: /info/en/about
+        - img [ref=e5]
+        - generic [ref=e9]: About
+      - link "Preferences" [ref=e10] [cursor=pointer]:
+        - /url: /preferences
+        - img [ref=e11]
+        - generic [ref=e13]: Preferences
+    - generic [ref=e14]:
+      - heading "Page not found" [level=1] [ref=e15]
+      - paragraph [ref=e16]:
+        - text: Go to
+        - link "search page" [ref=e17] [cursor=pointer]:
+          - /url: /
+        - text: .
+  - contentinfo [ref=e18]:
+    - paragraph [ref=e19]:
+      - text: Powered by
+      - link "SearXNG" [ref=e20] [cursor=pointer]:
+        - /url: /info/en/about
+      - text: "- 2026.5.31+7159b8aed — a privacy-respecting, open metasearch engine"
+      - link "Source code" [ref=e21] [cursor=pointer]:
+        - /url: https://github.com/searxng/searxng
+      - text: "|"
+      - link "Issue tracker" [ref=e22] [cursor=pointer]:
+        - /url: https://github.com/searxng/searxng/issues
+      - text: "|"
+      - link "Engine stats" [ref=e23] [cursor=pointer]:
+        - /url: /stats
+      - text: "|"
+      - link "Public instances" [ref=e24] [cursor=pointer]:
+        - /url: https://searx.space

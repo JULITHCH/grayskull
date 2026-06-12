@@ -1,0 +1,6 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]: My App
+  - generic [ref=e3]: sidebar way too wide
+  - generic [ref=e4]:
+    - heading "Welcome" [level=1] [ref=e5]
+    - paragraph [ref=e6]: hello world
