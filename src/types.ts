@@ -22,6 +22,8 @@ export interface ToolContext {
   askUser: (question: string, options?: string[]) => Promise<string>;
   /** Emit a progress note to the transcript. */
   note: (text: string) => void;
+  /** Fires when the user interrupts (esc) — long-running tools must stop. */
+  signal?: AbortSignal;
 }
 
 export interface ToolDef {

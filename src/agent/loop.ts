@@ -308,6 +308,7 @@ export class GrayskullAgent {
   ): Promise<string> {
     const ctx: ToolContext = {
       cwd: this.cwd,
+      signal,
       askUser: async (question, options) => {
         const answer = await this.ui.askUser(question, options);
         turnLog.push(`agent asked: ${question}\nuser answered: ${answer}`);
