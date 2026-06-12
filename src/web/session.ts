@@ -14,6 +14,14 @@ import { registerAgentTools } from "../agents/runner";
 import { agentListing } from "../agents/registry";
 import { skillTool } from "../skills/tool";
 import { skillListing } from "../skills/registry";
+import { makeTodoTool, type TodoItem } from "../tools/todo";
+import { memoryGraphData } from "../memory/scores";
+import { runChain, chainState } from "../chains/runner";
+import type { ChainDef, ChainContextMode } from "../chains/registry";
+import { runSlashCommand, type CommandContext } from "../slash";
+
+/** slash commands that open $EDITOR or fzf — they would hang the server */
+const TERMINAL_ONLY = /^\/(system|settings|resume)\b|^\/(memory|agents|thinkingchain|tc)\s+edit\b/;
 
 export type Broadcast = (msg: Record<string, unknown>) => void;
 
@@ -37,8 +45,11 @@ export class WebSession {
   private streamText = "";
   private pending = new Map<string, (answer: string) => void>();
   private pendingCounter = 0;
-  private queue: string[] = [];
+  private queue: Array<{ kind: "prompt"; text: string } | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string }> = [];
   private running = false;
+  private todoState: { items: TodoItem[] };
+  private sticky: { def: ChainDef; mode: ChainContextMode } | null = null;
+  private bridge: UiBridge;
 
   constructor(cwd: string, broadcast: Broadcast) {
     this.sid = `s${++sessionCounter}`;
@@ -49,6 +60,10 @@ export class WebSession {
     this.client = new LlmClient(this.settings);
     const registry = new ToolRegistry();
     for (const t of builtinTools()) registry.register(t);
+    // session-local todo so concurrent sessions don't share a task list
+    const todo = makeTodoTool();
+    this.todoState = todo.state;
+    registry.register(todo.tool);
     registry.register(skillTool(cwd));
     registerAgentTools({
       cwd,
@@ -103,6 +118,7 @@ export class WebSession {
       },
     };
 
+    this.bridge = bridge;
     this.memory.onUpdate = () => this.sendMemory();
     this.memory.onNote = (text) => bridge.pushItem({ type: "note", text });
     this.mcp.onChange = () => this.sendStatus();
@@ -135,15 +151,28 @@ export class WebSession {
       ctxPct: Math.min(100, Math.round((this.client.lastPromptTokens / this.settings.contextWindow) * 100)),
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: this.settings.model,
+      todo: this.todoState.items,
+      // chainState is process-global; only claim it while this session works
+      chain: this.busy ? chainState.running : null,
+      sticky: this.sticky ? { name: this.sticky.def.name, mode: this.sticky.mode } : null,
     });
   }
 
   sendMemory(): void {
-    this.send({
-      t: "memory",
-      global: loadGlobalMemory(),
-      local: loadLocalMemory(this.cwd),
-    });
+    const local = loadLocalMemory(this.cwd);
+    const m = this.settings.memory;
+    let graph = null;
+    try {
+      graph = memoryGraphData(this.cwd, local, {
+        halfLifeDays: m.halfLifeDays,
+        spreadFactor: m.spreadFactor,
+        pruneThreshold: m.pruneThreshold,
+        reviveThreshold: m.reviveThreshold,
+      });
+    } catch {
+      // graph is decoration — never break the message
+    }
+    this.send({ t: "memory", global: loadGlobalMemory(), local, graph });
   }
 
   summary(): Record<string, unknown> {
@@ -151,22 +180,93 @@ export class WebSession {
   }
 
   prompt(text: string): void {
-    this.queue.push(text);
+    if (text.startsWith("/")) {
+      void this.handleSlash(text);
+      return;
+    }
+    if (this.sticky) {
+      this.queue.push({ kind: "chain", def: this.sticky.def, mode: this.sticky.mode, task: text });
+    } else {
+      this.queue.push({ kind: "prompt", text });
+    }
     void this.drain();
+  }
+
+  private async handleSlash(text: string): Promise<void> {
+    const note = (t: string) => this.bridge.pushItem({ type: "note", text: t });
+    if (TERMINAL_ONLY.test(text)) {
+      note(`${text.split(" ")[0]} opens an editor/picker — run it in the terminal session`);
+      return;
+    }
+    const ctx: CommandContext = {
+      cwd: this.cwd,
+      settings: this.settings,
+      agent: this.agent,
+      memory: this.memory,
+      mcp: this.mcp,
+      perms: this.perms,
+      store: this.store,
+      push: (item) => this.bridge.pushItem(item),
+      setMode: (mode) => this.setMode(mode),
+      clearTranscript: () => {
+        this.items.length = 0;
+        this.send({ t: "replay", items: [] });
+      },
+      exit: () => note("sessions are closed from the browser, not /exit"),
+    };
+    try {
+      const result = await runSlashCommand(ctx, text);
+      if (result === "unknown") {
+        note(`unknown command ${text.split(" ")[0]} — try /help`);
+      } else if (result && "prompt" in result) {
+        this.queue.push({ kind: "prompt", text: result.prompt });
+        void this.drain();
+      } else if (result && "chain" in result) {
+        const { def, mode, task } = result.chain;
+        if (task) {
+          this.queue.push({ kind: "chain", def, mode, task });
+          void this.drain();
+        } else {
+          this.sticky = { def, mode };
+          note(`⛓ chain "${def.name}" (${mode}) active for this session — /tc off to stop`);
+          this.sendStatus();
+        }
+      }
+    } catch (err) {
+      note(`command failed: ${(err as Error).message}`);
+    }
+    // /tc off clears the global sticky; mirror it per-session
+    if (/^\/(tc|thinkingchain)\s+off\b/.test(text)) {
+      this.sticky = null;
+      this.sendStatus();
+    }
   }
 
   private async drain(): Promise<void> {
     if (this.running) return;
     this.running = true;
     try {
-      let next: string | undefined;
+      let next: (typeof this.queue)[number] | undefined;
       while ((next = this.queue.shift()) !== undefined) {
-        const item: TranscriptItem = { type: "user", text: next };
+        const label = next.kind === "prompt" ? next.text : `⛓ [${next.def.name}] ${next.task}`;
+        const item: TranscriptItem = { type: "user", text: label };
         this.items.push(item);
         this.send({ t: "item", item });
-        await this.agent.runTurn(next);
+        if (next.kind === "prompt") {
+          await this.agent.runTurn(next.text);
+        } else {
+          await runChain({
+            chain: next.def,
+            task: next.task,
+            mode: next.mode,
+            agent: this.agent,
+            ui: this.bridge,
+            memory: this.memory,
+          });
+        }
         this.store.save(this.agent.history);
         this.sendMemory();
+        this.sendStatus();
       }
     } finally {
       this.running = false;

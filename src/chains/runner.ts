@@ -7,7 +7,15 @@ const HANDOFF_CAP = 4000;
 
 /** Mutable progress for the statusline, same trick as tools/todo.ts todoState. */
 export const chainState: {
-  running: { name: string; step: number; total: number } | null;
+  running: {
+    name: string;
+    step: number;
+    total: number;
+    steps: string[];
+    gates: boolean[];
+    mode: ChainContextMode;
+    retrying: boolean;
+  } | null;
   /** sticky chain applied to every prompt until /thinkingchain off */
   sticky: { def: ChainDef; mode: ChainContextMode } | null;
 } = { running: null, sticky: null };
@@ -68,7 +76,15 @@ export async function runChain(opts: {
   let i = 0;
   while (i < chain.steps.length) {
     const step = chain.steps[i]!;
-    chainState.running = { name: chain.name, step: i + 1, total: chain.steps.length };
+    chainState.running = {
+      name: chain.name,
+      step: i + 1,
+      total: chain.steps.length,
+      steps: chain.steps,
+      gates: chain.steps.map(isGate),
+      mode,
+      retrying: failReason !== undefined,
+    };
     ui.pushItem({
       type: "banner",
       text: `⛓ step ${i + 1}/${chain.steps.length}: ${step}${failReason ? " (retry)" : ""}`,

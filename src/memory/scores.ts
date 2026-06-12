@@ -282,6 +282,36 @@ export function scoreTurn(opts: {
   return { notes };
 }
 
+export interface MemoryGraph {
+  nodes: Array<{ id: string; text: string; section: string; score: number; uses: number }>;
+  links: Array<{ a: string; b: string; sim: number }>;
+}
+
+/** Node/edge view of project memory for the web UI: activation scores as
+ *  node weight, the same lexical similarity that drives spreading activation
+ *  as edges. */
+export function memoryGraphData(cwd: string, memoryMd: string, cfg: ScoringConfig): MemoryGraph {
+  const bullets = parseMemoryBullets(memoryMd);
+  const store = new ScoreStore(cwd, cfg);
+  const tokens = new Map(bullets.map((b) => [b.hash, tokenize(b.text)]));
+  const nodes = bullets.map((b) => ({
+    id: b.hash,
+    text: b.text,
+    section: b.section,
+    score: Number(store.effective(b.hash).toFixed(3)),
+    uses: store.entries[b.hash]?.uses ?? 0,
+  }));
+  const links: MemoryGraph["links"] = [];
+  for (let i = 0; i < bullets.length; i++) {
+    for (let j = i + 1; j < bullets.length; j++) {
+      const a = bullets[i]!, b = bullets[j]!;
+      const sim = pairwiseSim(a, tokens.get(a.hash)!, b, tokens.get(b.hash)!);
+      if (sim >= NEIGHBOR_MIN_SIM) links.push({ a: a.hash, b: b.hash, sim: Number(sim.toFixed(2)) });
+    }
+  }
+  return { nodes, links };
+}
+
 /**
  * Render memory for prompt injection: strongest first within each section,
  * lowest-scored bullets dropped if over the token budget (file untouched).

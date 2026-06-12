@@ -16,6 +16,7 @@ import { runChain, chainState } from "../chains/runner";
 import type { ChainDef, ChainContextMode } from "../chains/registry";
 import type { CliLink } from "../web/clilink";
 import { loadGlobalMemory, loadLocalMemory } from "../memory/memory";
+import { memoryGraphData } from "../memory/scores";
 import { renderMarkdown } from "./markdown";
 import { pickFile } from "./external";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
@@ -177,11 +178,29 @@ export function App(props: AppProps): React.ReactElement {
       ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
+      todo: todoState.items,
+      chain: runningRef.current ? chainState.running : null,
+      sticky: chainState.sticky
+        ? { name: chainState.sticky.def.name, mode: chainState.sticky.mode }
+        : null,
     });
   };
 
   const publishMemory = () => {
-    link?.publish({ t: "memory", global: loadGlobalMemory(), local: loadLocalMemory(cwd) });
+    const local = loadLocalMemory(cwd);
+    let graph = null;
+    try {
+      const m = settings.memory;
+      graph = memoryGraphData(cwd, local, {
+        halfLifeDays: m.halfLifeDays,
+        spreadFactor: m.spreadFactor,
+        pruneThreshold: m.pruneThreshold,
+        reviveThreshold: m.reviveThreshold,
+      });
+    } catch {
+      // graph is decoration — never break the publish
+    }
+    link?.publish({ t: "memory", global: loadGlobalMemory(), local, graph });
   };
 
   const resolvePerm = (answer: "yes" | "always" | "no") => {
@@ -279,7 +298,7 @@ export function App(props: AppProps): React.ReactElement {
             const text = String(msg["text"] ?? "").trim();
             if (text) {
               pushItem({ type: "note", text: "⇄ prompt from web" });
-              submitToAgent(text);
+              void submitText(text);
             }
             break;
           }
@@ -359,7 +378,11 @@ export function App(props: AppProps): React.ReactElement {
       if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
       appendPromptHistory(cwd, text);
     }
+    await submitText(text);
+  };
 
+  /** Shared by the keyboard path and prompts arriving from the web hub. */
+  const submitText = async (text: string) => {
     if (text.startsWith("/")) {
       const ctx: CommandContext = {
         cwd,

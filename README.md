@@ -267,7 +267,14 @@ WebSockets, zero frontend build):
   (⚔) and MCP server (⇄) as nodes; edges animate while a node works, nodes glow amber
   on activity and fade when done. **Click any node** → modal with its live activity log
   (spawn task, every tool call, streamed output, final report)
-- **MEMORY ACTIVATION** panel — global vault + project memory, live after every turn
+- **MEMORY ACTIVATION graph** — project memory as a living node graph: node size and
+  glow = activation score, edges = the lexical similarity that drives spreading
+  activation, clustered by section. Click a memory → its text, score, uses and linked
+  memories. TEXT toggle for the flat view. Updates after every turn — watch it learn
+- **CHAIN // TODO panel** — running thinking chains as a live pipeline (steps light up,
+  ⛩ gates dashed, retries flash red) + the model's todo list with a progress bar
+- **slash commands work in web sessions** too (`/tc`, `/memory`, `/compact`, …);
+  editor/picker commands stay terminal-only
 - permission and ask_user requests pop as modals (y/a/n keys work)
 - mode buttons incl. KAMIKAZEEE — which flips the whole UI into a red-alert theme,
   matrix rain included

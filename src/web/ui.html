@@ -87,9 +87,32 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 #ctxBar { width: 110px; height: 8px; border: 1px solid var(--g-faint); position: relative; }
 #ctxFill { height: 100%; background: var(--g-dim); width: 0%; transition: width .5s; }
 
-#right { grid-row: 2; display: grid; grid-template-rows: 1fr 220px; gap: 8px; min-height: 0; }
+#right { grid-row: 2; display: grid; grid-template-rows: 1fr 1fr 170px; gap: 8px; min-height: 0; }
 #mesh { position: relative; }
 #meshSvg { width: 100%; height: 100%; }
+#memSvg { width: 100%; height: 100%; }
+.mnode circle { fill: rgba(0,20,6,.85); stroke: var(--g-dim); cursor: pointer; transition: r .4s, stroke .4s; }
+.mnode.s0 circle { stroke: #2a6; } .mnode.s1 circle { stroke: var(--cyan); } .mnode.s2 circle { stroke: var(--amber); }
+.mnode.s3 circle { stroke: #c8f; } .mnode.s4 circle { stroke: var(--red); }
+.mnode text { fill: var(--g-dim); font-size: 8px; text-anchor: middle; pointer-events: none; }
+.mlink { stroke: var(--g-faint); }
+.panel h2 .toggle { float: right; cursor: pointer; color: var(--g-dim); border: 1px solid var(--g-faint); padding: 0 6px; }
+.panel h2 .toggle:hover { color: var(--g); }
+#memLegend { position: absolute; bottom: 4px; left: 8px; font-size: 9px; color: var(--g-dim); pointer-events: none; }
+#ops { overflow-y: auto; }
+#opsBody { padding: 8px 10px; flex: 1; overflow-y: auto; font-size: 11px; }
+.chainPipe { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 8px; }
+.cstep { border: 1px solid var(--g-faint); padding: 2px 7px; color: var(--g-dim); font-size: 10px; }
+.cstep.done { color: var(--g); border-color: var(--g-dim); opacity: .6; }
+.cstep.active { color: var(--amber); border-color: var(--amber); text-shadow: 0 0 6px var(--amber); animation: pulse 1.2s infinite; }
+.cstep.gate { border-style: dashed; }
+.cstep.retry { color: var(--red); border-color: var(--red); }
+.carrow { color: var(--g-faint); }
+.todoRow { color: var(--g-dim); padding: 1px 0; }
+.todoRow.done { opacity: .45; text-decoration: line-through; }
+.todoRow.open { color: var(--g); }
+#todoBar { height: 6px; border: 1px solid var(--g-faint); margin: 4px 0 6px; }
+#todoFill { height: 100%; background: var(--g-dim); transition: width .4s; }
 .node { cursor: pointer; }
 .node circle { fill: rgba(0, 20, 6, .9); stroke: var(--g-dim); stroke-width: 1.5; transition: all .3s; }
 .node.core circle { stroke: var(--g); filter: drop-shadow(0 0 6px var(--g)); }
@@ -165,9 +188,15 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
       <h2>AGENT MESH</h2>
       <svg id="meshSvg"></svg>
     </div>
-    <div class="panel" id="memPanel">
-      <h2>MEMORY ACTIVATION</h2>
-      <div id="memBody">(no session)</div>
+    <div class="panel" id="memPanel" style="position:relative">
+      <h2>MEMORY ACTIVATION <span class="toggle" id="memToggle">TEXT</span></h2>
+      <svg id="memSvg"></svg>
+      <div id="memLegend"></div>
+      <div id="memBody" style="display:none">(no session)</div>
+    </div>
+    <div class="panel" id="ops">
+      <h2>CHAIN // TODO</h2>
+      <div id="opsBody">(idle)</div>
     </div>
   </div>
 </div>
@@ -259,7 +288,7 @@ function handle(m) {
     case "reasoning": stream(m.sid).reason = (stream(m.sid).reason + m.text).slice(-400); renderStreamMaybe(m.sid); break;
     case "stream_end": S.streams[m.sid] = { text: "", reason: "" }; renderStreamMaybe(m.sid); break;
     case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; renderSessions(); renderStatus(); break;
-    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); break;
+    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); renderOps(); break;
     case "memory": S.memory[m.sid] = m; renderMemory(); break;
     case "agent": agentEvent(m.sid, m.ev); break;
     case "perm_req": S.pendingPerm = m; showPerm(); break;
@@ -444,15 +473,90 @@ function openNode(id) {
 function closeModal(id) { $(id).classList.remove("open"); }
 addEventListener("resize", renderMesh);
 
-/* ── memory panel ────────────────────────────────────────────── */
+/* ── memory panel: activation graph + text view ──────────────── */
+let memView = "graph";
+$("memToggle").onclick = () => {
+  memView = memView === "graph" ? "text" : "graph";
+  $("memToggle").textContent = memView === "graph" ? "TEXT" : "GRAPH";
+  $("memSvg").style.display = memView === "graph" ? "" : "none";
+  $("memLegend").style.display = memView === "graph" ? "" : "none";
+  $("memBody").style.display = memView === "graph" ? "none" : "";
+  renderMemory();
+};
+
 function renderMemory() {
   const m = S.memory[S.current] ?? {};
+  // text view
   let html = "";
   if (m.global) html += `<div class="mem-h">⚡ GLOBAL VAULT</div>` + m.global.split("\n").map((l) => `<div class="mem-b">${esc(l)}</div>`).join("");
   if (m.local) html += m.local.split("\n").map((l) =>
     l.startsWith("##") ? `<div class="mem-h">${esc(l.replace(/^#+\s*/, "").toUpperCase())}</div>`
     : l.trim() ? `<div class="mem-b">${esc(l)}</div>` : "").join("");
   $("memBody").innerHTML = html || "(memory empty)";
+  renderMemoryGraph(m.graph);
+}
+
+function renderMemoryGraph(graph) {
+  const svg = $("memSvg");
+  if (!graph || !graph.nodes?.length) {
+    svg.innerHTML = `<text x="50%" y="50%" fill="#0a5" font-size="11" text-anchor="middle">no project memory yet — every turn grows the brain</text>`;
+    $("memLegend").textContent = "";
+    return;
+  }
+  const W = svg.clientWidth || 400, H = svg.clientHeight || 260;
+  const sections = [...new Set(graph.nodes.map((n) => n.section))];
+  // section cluster anchors arranged in a ring
+  const anchors = {};
+  sections.forEach((s, i) => {
+    const a = (i / sections.length) * Math.PI * 2 - Math.PI / 2;
+    anchors[s] = { x: W / 2 + (W / 3.1) * Math.cos(a), y: H / 2 + (H / 3.2) * Math.sin(a) };
+  });
+  // nodes orbit their section anchor, sorted so strong memories sit closest
+  const pos = {};
+  for (const s of sections) {
+    const members = graph.nodes.filter((n) => n.section === s).sort((a, b) => b.score - a.score);
+    members.forEach((n, i) => {
+      const a = (i / Math.max(members.length, 1)) * Math.PI * 2;
+      const r = 12 + i * 7;
+      pos[n.id] = { x: anchors[s].x + r * Math.cos(a), y: anchors[s].y + r * Math.sin(a) };
+    });
+  }
+  let html = "";
+  for (const l of graph.links) {
+    const a = pos[l.a], b = pos[l.b];
+    if (!a || !b) continue;
+    html += `<line class="mlink" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-opacity="${Math.min(l.sim, .8)}" stroke-width="${l.sim > .6 ? 1.5 : 1}"/>`;
+  }
+  for (const n of graph.nodes) {
+    const p = pos[n.id];
+    const r = 3 + Math.min(n.score, 3) * 3.5;          // activation = size
+    const glow = n.score > 1.5 ? `filter="drop-shadow(0 0 ${n.score * 2}px var(--g))"` : "";
+    const si = sections.indexOf(n.section) % 5;
+    html += `<g class="mnode s${si}" onclick='openMemNode("${n.id}")'>
+      <circle cx="${p.x}" cy="${p.y}" r="${r}" ${glow} fill-opacity="${0.4 + Math.min(n.score, 3) / 5}"/>
+    </g>`;
+  }
+  svg.innerHTML = html;
+  $("memLegend").textContent = sections.map((s, i) => `●${i}=${s}`).join("  ") + "  · size = activation";
+}
+function openMemNode(id) {
+  const m = S.memory[S.current];
+  const n = m?.graph?.nodes.find((x) => x.id === id);
+  if (!n) return;
+  const neighbors = (m.graph.links || [])
+    .filter((l) => l.a === id || l.b === id)
+    .map((l) => {
+      const other = m.graph.nodes.find((x) => x.id === (l.a === id ? l.b : l.a));
+      return other ? `  ${(l.sim * 100) | 0}% ↔ ${other.text}` : "";
+    })
+    .filter(Boolean);
+  S.modalNode = null;
+  $("nodeModalTitle").textContent = "🧠 " + n.section;
+  $("nodeModalBody").textContent =
+    n.text +
+    `\n\nactivation: ${n.score}   uses: ${n.uses}` +
+    (neighbors.length ? "\n\nlinked memories (spreading activation):\n" + neighbors.join("\n") : "");
+  $("nodeModalBg").classList.add("open");
 }
 
 /* ── permission / ask modals ─────────────────────────────────── */
@@ -484,8 +588,36 @@ function answerAsk(v) { const a = S.pendingAsk; if (!a) return; send({ t: "answe
 $("askSend").onclick = () => $("askInput").value.trim() && answerAsk($("askInput").value.trim());
 $("askInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && $("askInput").value.trim()) answerAsk($("askInput").value.trim()); });
 
+/* ── chain pipeline + todo panel ─────────────────────────────── */
+function renderOps() {
+  const st = S.status[S.current] ?? {};
+  let html = "";
+  const chain = st.chain;
+  if (chain) {
+    html += `<div style="color:var(--g);margin-bottom:4px">⛓ ${esc(chain.name)} <span style="color:var(--g-dim)">[${chain.mode}] step ${chain.step}/${chain.total}</span></div><div class="chainPipe">`;
+    chain.steps.forEach((s, i) => {
+      const cls = ["cstep"];
+      if (chain.gates[i]) cls.push("gate");
+      if (i + 1 < chain.step) cls.push("done");
+      if (i + 1 === chain.step) cls.push("active", chain.retrying ? "retry" : "");
+      html += `<span class="${cls.join(" ")}" title="${chain.gates[i] ? "review gate" : ""}">${chain.gates[i] ? "⛩ " : ""}${esc(s)}</span>`;
+      if (i < chain.steps.length - 1) html += `<span class="carrow">→</span>`;
+    });
+    html += `</div>`;
+  } else if (st.sticky) {
+    html += `<div style="color:var(--g-dim);margin-bottom:6px">⛓ ${esc(st.sticky.name)} [${st.sticky.mode}] armed — next prompt runs the chain</div>`;
+  }
+  const todo = st.todo ?? [];
+  if (todo.length) {
+    const done = todo.filter((i) => i.done).length;
+    html += `<div style="color:var(--g)">TODO ${done}/${todo.length}</div><div id="todoBar"><div id="todoFill" style="width:${(done / todo.length) * 100}%"></div></div>`;
+    html += todo.map((i) => `<div class="todoRow ${i.done ? "done" : "open"}">${i.done ? "✓" : "▢"} ${esc(i.text)}</div>`).join("");
+  }
+  $("opsBody").innerHTML = html || "(idle — chains and todos appear here live)";
+}
+
 function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
-function renderAll() { renderTranscript(); renderStatus(); renderMemory(); renderMesh(); }
+function renderAll() { renderTranscript(); renderStatus(); renderMemory(); renderMesh(); renderOps(); }
 connect();
 </script>
 </body>
