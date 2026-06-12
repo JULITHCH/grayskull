@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAYSKULL // WEB</title>
+<style>
+:root {
+  --g: #00ff66; --g-dim: #00aa44; --g-faint: #014420;
+  --bg: #010701; --panel: rgba(0, 20, 6, .72); --red: #ff2244; --amber: #ffaa00; --cyan: #00ddff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--g);
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 13px; overflow: hidden;
+}
+body.kamikazeee { --g: #ff5566; --g-dim: #cc2233; --g-faint: #440a12; --panel: rgba(28, 2, 6, .78); }
+#rain { position: fixed; inset: 0; z-index: 0; opacity: .5; }
+body::after { /* CRT scanlines */
+  content: ""; position: fixed; inset: 0; z-index: 50; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.16) 2px 4px);
+}
+#app { position: relative; z-index: 1; display: grid; height: 100vh;
+  grid-template-columns: 220px 1fr 420px; grid-template-rows: 46px 1fr; gap: 8px; padding: 8px; }
+
+header { grid-column: 1 / 4; display: flex; align-items: center; gap: 16px;
+  border: 1px solid var(--g-faint); background: var(--panel); padding: 0 14px; }
+header .logo { font-weight: 700; letter-spacing: 4px; font-size: 16px;
+  text-shadow: 0 0 8px var(--g), 0 0 24px var(--g-dim); animation: flicker 6s infinite; }
+@keyframes flicker { 0%,93%,100% {opacity:1} 94% {opacity:.6} 95% {opacity:1} 97% {opacity:.7} 98% {opacity:1} }
+header .chip { border: 1px solid var(--g-faint); padding: 2px 8px; font-size: 11px; color: var(--g-dim); }
+header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0 0 6px var(--red); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .4 } }
+
+.panel { border: 1px solid var(--g-faint); background: var(--panel); display: flex; flex-direction: column; min-height: 0;
+  box-shadow: inset 0 0 30px rgba(0,255,102,.03); }
+.panel h2 { font-size: 11px; letter-spacing: 2px; color: var(--g-dim); padding: 6px 10px;
+  border-bottom: 1px solid var(--g-faint); flex: 0 0 auto; }
+
+#sessions { grid-row: 2; }
+#sessionList { overflow-y: auto; flex: 1; }
+.sess { padding: 8px 10px; border-bottom: 1px solid var(--g-faint); cursor: pointer; }
+.sess:hover, .sess.active { background: rgba(0,255,102,.08); }
+.sess .sid { color: var(--g); font-weight: 700; }
+.sess .cwd { color: var(--g-dim); font-size: 11px; word-break: break-all; }
+.sess .busy { color: var(--amber); }
+#newSess { margin: 8px; padding: 6px; border: 1px dashed var(--g-dim); background: none; color: var(--g);
+  cursor: pointer; font-family: inherit; }
+#newSess:hover { background: rgba(0,255,102,.1); }
+
+#main { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
+#transcript { flex: 1; overflow-y: auto; padding: 10px 14px; scroll-behavior: smooth; }
+.item { margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+.item.user { color: var(--cyan); }
+.item.user::before { content: "❯ "; font-weight: 700; }
+.item.assistant { color: #ccffdd; }
+body.kamikazeee .item.assistant { color: #ffd5da; }
+.item.note { color: var(--g-dim); font-size: 12px; }
+.item.banner { color: var(--amber); font-weight: 700; text-shadow: 0 0 8px rgba(255,170,0,.5); }
+.item.banner.red { color: var(--red); text-shadow: 0 0 10px var(--red); }
+.item.tool { color: var(--g-dim); font-size: 12px; }
+.item.tool .t-head { color: var(--g); }
+.item.ask { color: var(--cyan); }
+.diff { margin: 4px 0 4px 16px; font-size: 12px; }
+.diff .add { color: #4afa7b; } .diff .del { color: #ff5566; } .diff .hunk { color: var(--cyan); }
+.stream { color: #ccffdd; opacity: .9; }
+.reason { color: var(--g-dim); font-style: italic; font-size: 12px; }
+.reason::before { content: "∴ "; }
+.cursor::after { content: "▋"; animation: pulse 1s infinite; }
+
+#inputBar { flex: 0 0 auto; border-top: 1px solid var(--g-faint); padding: 8px; display: flex; gap: 8px; align-items: center; }
+#promptInput { flex: 1; background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim);
+  padding: 8px 10px; font-family: inherit; font-size: 13px; outline: none; }
+#promptInput:focus { box-shadow: 0 0 10px rgba(0,255,102,.25); }
+button.btn { background: none; border: 1px solid var(--g-dim); color: var(--g); padding: 7px 12px;
+  font-family: inherit; cursor: pointer; font-size: 12px; }
+button.btn:hover { background: rgba(0,255,102,.12); }
+button.btn.danger { color: var(--red); border-color: var(--red); }
+#statusBar { display: flex; gap: 14px; padding: 5px 10px; border-top: 1px solid var(--g-faint);
+  font-size: 11px; color: var(--g-dim); align-items: center; }
+#modeBtns { display: flex; gap: 4px; }
+.modeBtn { font-size: 10px; padding: 2px 7px; border: 1px solid var(--g-faint); cursor: pointer; color: var(--g-dim); }
+.modeBtn.active { color: var(--g); border-color: var(--g); text-shadow: 0 0 6px var(--g); }
+.modeBtn.kami.active { color: var(--red); border-color: var(--red); text-shadow: 0 0 8px var(--red); }
+#ctxBar { width: 110px; height: 8px; border: 1px solid var(--g-faint); position: relative; }
+#ctxFill { height: 100%; background: var(--g-dim); width: 0%; transition: width .5s; }
+
+#right { grid-row: 2; display: grid; grid-template-rows: 1fr 220px; gap: 8px; min-height: 0; }
+#mesh { position: relative; }
+#meshSvg { width: 100%; height: 100%; }
+.node { cursor: pointer; }
+.node circle { fill: rgba(0, 20, 6, .9); stroke: var(--g-dim); stroke-width: 1.5; transition: all .3s; }
+.node.core circle { stroke: var(--g); filter: drop-shadow(0 0 6px var(--g)); }
+.node.hot circle { stroke: var(--amber); filter: drop-shadow(0 0 10px var(--amber)); }
+.node.dead circle { stroke: var(--g-faint); opacity: .5; }
+.node text { fill: var(--g); font-size: 10px; text-anchor: middle; font-family: inherit; pointer-events: none; }
+.node.dead text { fill: var(--g-dim); opacity: .6; }
+.edge { stroke: var(--g-faint); stroke-width: 1; }
+.edge.hot { stroke: var(--amber); stroke-dasharray: 4 4; animation: dash 1s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -8; } }
+#memPanel { overflow: hidden; }
+#memBody { overflow-y: auto; padding: 8px 10px; font-size: 11px; flex: 1; }
+#memBody .mem-h { color: var(--g); margin: 6px 0 2px; letter-spacing: 1px; }
+#memBody .mem-b { color: var(--g-dim); margin-left: 8px; }
+
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100;
+  display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+.modal-bg.open { display: flex; }
+.modal { width: min(760px, 92vw); max-height: 84vh; border: 1px solid var(--g); background: #020c04;
+  box-shadow: 0 0 40px rgba(0,255,102,.25); display: flex; flex-direction: column; }
+body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255,34,68,.3); background: #0c0204; }
+.modal h3 { padding: 8px 12px; border-bottom: 1px solid var(--g-faint); font-size: 13px; letter-spacing: 1px; }
+.modal .body { padding: 12px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; flex: 1; }
+.modal .actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--g-faint); }
+.modal input { flex: 1; background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim);
+  padding: 6px 8px; font-family: inherit; outline: none; }
+#toast { position: fixed; bottom: 16px; right: 16px; z-index: 200; color: var(--red); display: none;
+  border: 1px solid var(--red); background: rgba(20,0,4,.9); padding: 8px 14px; }
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--g-faint); }
+</style>
+</head>
+<body>
+<canvas id="rain"></canvas>
+<div id="app">
+  <header>
+    <div class="logo">GRAYSKULL<span style="color:var(--g-dim)">//WEB</span></div>
+    <div class="chip" id="modelChip">model: —</div>
+    <div class="chip" id="mcpChip">mcp: —</div>
+    <div class="chip" id="kamiChip" style="display:none" >⚠ KAMIKAZEEE</div>
+    <div style="flex:1"></div>
+    <div class="chip" id="connChip">connecting…</div>
+  </header>
+
+  <div class="panel" id="sessions">
+    <h2>SESSIONS</h2>
+    <div id="sessionList"></div>
+    <button id="newSess">+ NEW SESSION</button>
+  </div>
+
+  <div class="panel" id="main">
+    <div id="transcript"></div>
+    <div id="inputBar">
+      <input id="promptInput" placeholder="command the power of grayskull…" autocomplete="off">
+      <button class="btn" id="sendBtn">SEND</button>
+      <button class="btn danger" id="stopBtn">ESC</button>
+    </div>
+    <div id="statusBar">
+      <div id="modeBtns">
+        <span class="modeBtn" data-mode="normal">NORMAL</span>
+        <span class="modeBtn" data-mode="accept-edits">ACCEPT-EDITS</span>
+        <span class="modeBtn" data-mode="plan">PLAN</span>
+        <span class="modeBtn kami" data-mode="kamikazeee">KAMIKAZEEE</span>
+      </div>
+      <div style="flex:1"></div>
+      <span id="busyTxt"></span>
+      <div id="ctxBar" title="context fill"><div id="ctxFill"></div></div>
+      <span id="ctxTxt">ctx 0%</span>
+    </div>
+  </div>
+
+  <div id="right">
+    <div class="panel" id="mesh">
+      <h2>AGENT MESH</h2>
+      <svg id="meshSvg"></svg>
+    </div>
+    <div class="panel" id="memPanel">
+      <h2>MEMORY ACTIVATION</h2>
+      <div id="memBody">(no session)</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="nodeModalBg"><div class="modal">
+  <h3 id="nodeModalTitle">node</h3>
+  <div class="body" id="nodeModalBody"></div>
+  <div class="actions"><div style="flex:1"></div><button class="btn" onclick="closeModal('nodeModalBg')">CLOSE</button></div>
+</div></div>
+
+<div class="modal-bg" id="permModalBg"><div class="modal">
+  <h3>⚠ PERMISSION REQUEST</h3>
+  <div class="body" id="permBody"></div>
+  <div class="actions">
+    <button class="btn" id="permYes">[Y]ES</button>
+    <button class="btn" id="permAlways">[A]LWAYS</button>
+    <button class="btn danger" id="permNo">[N]O</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="askModalBg"><div class="modal">
+  <h3>? GRAYSKULL ASKS</h3>
+  <div class="body" id="askBody"></div>
+  <div class="actions">
+    <input id="askInput" placeholder="type an answer…">
+    <button class="btn" id="askSend">ANSWER</button>
+  </div>
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+/* ── matrix rain ─────────────────────────────────────────────── */
+const rain = document.getElementById("rain"), rctx = rain.getContext("2d");
+const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ01GRAYSKULL";
+let cols = [], fs = 14;
+function sizeRain() {
+  rain.width = innerWidth; rain.height = innerHeight;
+  cols = Array(Math.ceil(innerWidth / fs)).fill(0).map(() => Math.random() * -50);
+}
+sizeRain(); addEventListener("resize", sizeRain);
+setInterval(() => {
+  rctx.fillStyle = "rgba(1,7,1,.12)"; rctx.fillRect(0, 0, rain.width, rain.height);
+  rctx.font = fs + "px monospace";
+  const color = document.body.classList.contains("kamikazeee") ? "#5a0a14" : "#0a3d1a";
+  for (let i = 0; i < cols.length; i++) {
+    rctx.fillStyle = Math.random() > .97 ? (document.body.classList.contains("kamikazeee") ? "#ff2244" : "#00ff66") : color;
+    rctx.fillText(GLYPHS[Math.random() * GLYPHS.length | 0], i * fs, cols[i] * fs);
+    cols[i] = cols[i] * fs > rain.height && Math.random() > .98 ? 0 : cols[i] + 1;
+  }
+}, 60);
+
+/* ── state ───────────────────────────────────────────────────── */
+const S = {
+  ws: null, sessions: [], current: null, defaultCwd: "",
+  transcripts: {},   // sid -> array of rendered item HTML
+  streams: {},       // sid -> {text, reason}
+  status: {},        // sid -> status msg
+  nodes: {},         // sid -> Map(nodeId -> {label, kind, state, log:[]})
+  memory: {},        // sid -> {global, local}
+  pendingPerm: null, pendingAsk: null,
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+/* ── websocket ───────────────────────────────────────────────── */
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  S.ws = ws;
+  ws.onopen = () => { $("connChip").textContent = "● online"; $("connChip").style.color = "var(--g)"; };
+  ws.onclose = () => { $("connChip").textContent = "○ reconnecting…"; setTimeout(connect, 1500); };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+}
+const send = (o) => S.ws?.readyState === 1 && S.ws.send(JSON.stringify(o));
+
+function handle(m) {
+  switch (m.t) {
+    case "hello": S.defaultCwd = m.defaultCwd; break;
+    case "sessions":
+      S.sessions = m.list;
+      if (!S.current && m.list.length) S.current = m.list[m.list.length - 1].sid;
+      renderSessions(); renderAll(); break;
+    case "replay":
+      S.transcripts[m.sid] = [];
+      for (const it of m.items) pushTranscript(m.sid, it, false);
+      renderTranscript(); break;
+    case "item": pushTranscript(m.sid, m.item, true); break;
+    case "delta": stream(m.sid).text += m.text; renderStreamMaybe(m.sid); break;
+    case "reasoning": stream(m.sid).reason = (stream(m.sid).reason + m.text).slice(-400); renderStreamMaybe(m.sid); break;
+    case "stream_end": S.streams[m.sid] = { text: "", reason: "" }; renderStreamMaybe(m.sid); break;
+    case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; renderSessions(); renderStatus(); break;
+    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); break;
+    case "memory": S.memory[m.sid] = m; renderMemory(); break;
+    case "agent": agentEvent(m.sid, m.ev); break;
+    case "perm_req": S.pendingPerm = m; showPerm(); break;
+    case "ask_req": S.pendingAsk = m; showAsk(); break;
+    case "error": toast(m.text); break;
+  }
+}
+const stream = (sid) => (S.streams[sid] ??= { text: "", reason: "" });
+
+/* ── sessions ────────────────────────────────────────────────── */
+function renderSessions() {
+  $("sessionList").innerHTML = S.sessions.map((s) => {
+    const st = S.status[s.sid] ?? {};
+    return `<div class="sess ${s.sid === S.current ? "active" : ""}" onclick="selectSession('${s.sid}')">
+      <div class="sid">${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}</div>
+      <div class="cwd">${esc(s.cwd)}</div></div>`;
+  }).join("");
+}
+function selectSession(sid) { S.current = sid; renderSessions(); renderAll(); }
+$("newSess").onclick = () => {
+  const cwd = prompt("project directory:", S.defaultCwd);
+  if (cwd) send({ t: "new_session", cwd });
+};
+
+/* ── transcript ──────────────────────────────────────────────── */
+function itemHtml(it) {
+  if (it.type === "user") return `<div class="item user">${esc(it.text)}</div>`;
+  if (it.type === "assistant") return `<div class="item assistant">${esc(it.text)}</div>`;
+  if (it.type === "note") return `<div class="item note">${esc(it.text)}</div>`;
+  if (it.type === "banner") return `<div class="item banner ${it.color === "red" ? "red" : ""}">${esc(it.text)}</div>`;
+  if (it.type === "ask") return `<div class="item ask">? ${esc(it.question)}${it.answer ? "<br>→ " + esc(it.answer) : ""}</div>`;
+  if (it.type === "tool") {
+    const icon = it.state === "running" ? "◐" : it.state === "done" ? "●" : it.state === "denied" ? "⊘" : "✗";
+    let html = `<div class="item tool"><span class="t-head">${icon} ${esc(it.detail)}</span>`;
+    if (it.state === "done" && it.preview) {
+      const lines = it.preview.split("\n").filter((l) => !/^(Index:|={3,}|---|\+\+\+)/.test(l)).slice(0, 30);
+      html += `<div class="diff">` + lines.map((l) =>
+        `<div class="${l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.startsWith("@@") ? "hunk" : ""}">${esc(l) || "&nbsp;"}</div>`).join("") + `</div>`;
+    } else if (it.result && it.state !== "running") {
+      html += `<br><span style="opacity:.7">${esc(it.result.split("\n").slice(0, 3).join("\n").slice(0, 280))}</span>`;
+    }
+    return html + "</div>";
+  }
+  return "";
+}
+function pushTranscript(sid, it, live) {
+  const arr = (S.transcripts[sid] ??= []);
+  // replace running tool card when it completes
+  if (it.type === "tool" && it.state !== "running") {
+    const probe = `data-tool="${esc(it.detail)}"`;
+    const idx = arr.findLastIndex((h) => h.includes(probe) && h.includes("◐"));
+    if (idx >= 0) { arr[idx] = `<span data-tool="${esc(it.detail)}"></span>` + itemHtml(it); if (live && sid === S.current) renderTranscript(); return; }
+  }
+  const wrapped = it.type === "tool" ? `<span data-tool="${esc(it.detail)}"></span>` + itemHtml(it) : itemHtml(it);
+  arr.push(wrapped);
+  if (arr.length > 600) arr.shift();
+  if (live && sid === S.current) renderTranscript();
+  if (it.type === "tool") nodePulse(sid, "core", it.detail + " [" + it.state + "]");
+}
+function renderTranscript() {
+  const el = $("transcript");
+  const sid = S.current;
+  const st = stream(sid ?? "");
+  el.innerHTML = (S.transcripts[sid] ?? []).join("") +
+    (st.reason && !st.text ? `<div class="reason">${esc(st.reason.split("\n").slice(-3).join("\n"))}</div>` : "") +
+    (st.text ? `<div class="stream cursor">${esc(st.text)}</div>` : "");
+  el.scrollTop = el.scrollHeight;
+}
+let streamRaf = null;
+function renderStreamMaybe(sid) {
+  if (sid !== S.current || streamRaf) return;
+  streamRaf = requestAnimationFrame(() => { streamRaf = null; renderTranscript(); });
+}
+
+/* ── input / modes ───────────────────────────────────────────── */
+function sendPrompt() {
+  const text = $("promptInput").value.trim();
+  if (!text || !S.current) return;
+  send({ t: "prompt", sid: S.current, text });
+  $("promptInput").value = "";
+}
+$("sendBtn").onclick = sendPrompt;
+$("promptInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendPrompt(); });
+$("stopBtn").onclick = () => S.current && send({ t: "interrupt", sid: S.current });
+document.querySelectorAll(".modeBtn").forEach((b) => {
+  b.onclick = () => S.current && send({ t: "mode", sid: S.current, mode: b.dataset.mode });
+});
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !S.pendingPerm && !S.pendingAsk) S.current && send({ t: "interrupt", sid: S.current }); });
+
+function renderStatus() {
+  const st = S.status[S.current] ?? {};
+  $("modelChip").textContent = "model: " + (st.model ? st.model.split("/").pop() : "—");
+  $("mcpChip").textContent = "mcp: " + (st.mcp ? st.mcp.filter((m) => m.state === "connected").length + "/" + st.mcp.length : "—");
+  $("ctxFill").style.width = (st.ctxPct ?? 0) + "%";
+  $("ctxFill").style.background = (st.ctxPct ?? 0) > 70 ? "var(--amber)" : "var(--g-dim)";
+  $("ctxTxt").textContent = "ctx " + (st.ctxPct ?? 0) + "%";
+  $("busyTxt").textContent = st.busy ? "⣾ " + (st.what || "working") + " " : "";
+  document.querySelectorAll(".modeBtn").forEach((b) => b.classList.toggle("active", b.dataset.mode === st.mode));
+  const kami = st.mode === "kamikazeee";
+  document.body.classList.toggle("kamikazeee", kami);
+  $("kamiChip").style.display = kami ? "" : "none";
+  $("kamiChip").className = "chip alert";
+  // mcp nodes
+  if (st.mcp) for (const m of st.mcp) ensureNode(S.current, "mcp:" + m.name, m.name, "mcp", m.state === "connected" ? "idle" : "dead");
+  renderMesh();
+}
+
+/* ── agent mesh ──────────────────────────────────────────────── */
+function nodes(sid) { return (S.nodes[sid] ??= new Map()); }
+function ensureNode(sid, id, label, kind, state) {
+  const map = nodes(sid);
+  if (!map.has(id)) map.set(id, { id, label, kind, state: state ?? "idle", log: [] });
+  else if (state) map.get(id).state = state;
+  return map.get(id);
+}
+function nodeLog(sid, id, line) {
+  const n = nodes(sid).get(id);
+  if (!n) return;
+  n.log.push(`[${new Date().toTimeString().slice(0, 8)}] ${line}`);
+  if (n.log.length > 400) n.log.shift();
+  if ($("nodeModalBg").classList.contains("open") && S.modalNode === id && sid === S.current) {
+    $("nodeModalBody").textContent = n.log.join("\n");
+    $("nodeModalBody").scrollTop = $("nodeModalBody").scrollHeight;
+  }
+}
+function nodePulse(sid, id, line) {
+  const n = ensureNode(sid, id, id === "core" ? "GRAYSKULL" : id, id === "core" ? "core" : "agent");
+  if (n.state !== "dead") { n.state = "hot"; n.cool = Date.now() + 2500; }
+  if (line) nodeLog(sid, id, line);
+  renderMesh();
+}
+function agentEvent(sid, ev) {
+  if (ev.kind === "spawn") { ensureNode(sid, ev.id, ev.agent, "agent", "hot").cool = Date.now() + 2500; nodeLog(sid, ev.id, "SPAWN: " + ev.task); }
+  if (ev.kind === "tool") nodePulse(sid, ev.id, ev.detail + " [" + ev.state + "]");
+  if (ev.kind === "delta") nodeLog(sid, ev.id, ev.text.trim());
+  if (ev.kind === "done") { ensureNode(sid, ev.id, ev.agent, "agent", "dead"); nodeLog(sid, ev.id, "DONE:\n" + ev.report); }
+  renderMesh();
+}
+setInterval(() => { // cool down hot nodes
+  let dirty = false;
+  for (const map of Object.values(S.nodes)) for (const n of map.values()) {
+    if (n.state === "hot" && n.cool && Date.now() > n.cool) { n.state = "idle"; dirty = true; }
+  }
+  if (dirty) renderMesh();
+}, 800);
+
+function renderMesh() {
+  const svg = $("meshSvg");
+  const W = svg.clientWidth || 400, H = svg.clientHeight || 400;
+  const map = nodes(S.current ?? "");
+  ensureNode(S.current ?? "", "core", "GRAYSKULL", "core");
+  const core = map.get("core");
+  const agents = [...map.values()].filter((n) => n.kind === "agent");
+  const mcps = [...map.values()].filter((n) => n.kind === "mcp");
+  const cx = W / 2, cy = H / 2 - 20;
+  let html = "";
+  const place = (list, r, a0) => list.map((n, i) => {
+    const a = a0 + (i / Math.max(list.length, 1)) * Math.PI * 1.6;
+    return { n, x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  });
+  const placed = [...place(agents, Math.min(W, H) / 2 - 56, -Math.PI / 2), ...place(mcps, Math.min(W, H) / 2 - 30, Math.PI / 3)];
+  for (const p of placed) html += `<line class="edge ${p.n.state === "hot" ? "hot" : ""}" x1="${cx}" y1="${cy}" x2="${p.x}" y2="${p.y}"/>`;
+  const drawNode = (n, x, y, r) => `<g class="node ${n.kind} ${n.state}" onclick="openNode('${n.id}')">
+    <circle cx="${x}" cy="${y}" r="${r}"/>
+    <text x="${x}" y="${y + r + 12}">${esc(n.label.slice(0, 16))}</text>
+    <text x="${x}" y="${y + 4}" style="font-size:${r > 20 ? 14 : 11}px">${n.kind === "core" ? "⚡" : n.kind === "mcp" ? "⇄" : "⚔"}</text></g>`;
+  html += drawNode(core, cx, cy, 26);
+  for (const p of placed) html += drawNode(p.n, p.x, p.y, 16);
+  svg.innerHTML = html;
+}
+function openNode(id) {
+  const n = nodes(S.current ?? "").get(id);
+  if (!n) return;
+  S.modalNode = id;
+  $("nodeModalTitle").textContent = (n.kind === "core" ? "⚡ " : n.kind === "mcp" ? "⇄ " : "⚔ ") + n.label + " — " + n.state;
+  $("nodeModalBody").textContent = n.log.join("\n") || "(no activity yet)";
+  $("nodeModalBg").classList.add("open");
+  $("nodeModalBody").scrollTop = $("nodeModalBody").scrollHeight;
+}
+function closeModal(id) { $(id).classList.remove("open"); }
+addEventListener("resize", renderMesh);
+
+/* ── memory panel ────────────────────────────────────────────── */
+function renderMemory() {
+  const m = S.memory[S.current] ?? {};
+  let html = "";
+  if (m.global) html += `<div class="mem-h">⚡ GLOBAL VAULT</div>` + m.global.split("\n").map((l) => `<div class="mem-b">${esc(l)}</div>`).join("");
+  if (m.local) html += m.local.split("\n").map((l) =>
+    l.startsWith("##") ? `<div class="mem-h">${esc(l.replace(/^#+\s*/, "").toUpperCase())}</div>`
+    : l.trim() ? `<div class="mem-b">${esc(l)}</div>` : "").join("");
+  $("memBody").innerHTML = html || "(memory empty)";
+}
+
+/* ── permission / ask modals ─────────────────────────────────── */
+function showPerm() {
+  const p = S.pendingPerm;
+  if (!p) return closeModal("permModalBg");
+  let body = p.detail;
+  if (p.preview) body += "\n\n" + p.preview.split("\n").filter((l) => !/^(Index:|={3,}|---|\+\+\+)/.test(l)).slice(0, 40).join("\n");
+  $("permBody").textContent = body;
+  $("permModalBg").classList.add("open");
+}
+const answerPerm = (v) => { const p = S.pendingPerm; if (!p) return; send({ t: "answer", sid: p.sid, reqId: p.reqId, value: v }); S.pendingPerm = null; closeModal("permModalBg"); };
+$("permYes").onclick = () => answerPerm("yes");
+$("permAlways").onclick = () => answerPerm("always");
+$("permNo").onclick = () => answerPerm("no");
+addEventListener("keydown", (e) => {
+  if (S.pendingPerm) { if (e.key === "y") answerPerm("yes"); if (e.key === "a") answerPerm("always"); if (e.key === "n") answerPerm("no"); }
+});
+
+function showAsk() {
+  const a = S.pendingAsk;
+  if (!a) return closeModal("askModalBg");
+  $("askBody").innerHTML = esc(a.question) + (a.options ? "<br><br>" + a.options.map((o, i) =>
+    `<button class="btn" style="margin:3px" onclick="answerAsk(${JSON.stringify(o).replace(/"/g, "&quot;")})">${i + 1}. ${esc(o)}</button>`).join("") : "");
+  $("askModalBg").classList.add("open");
+  $("askInput").focus();
+}
+function answerAsk(v) { const a = S.pendingAsk; if (!a) return; send({ t: "answer", sid: a.sid, reqId: a.reqId, value: v }); S.pendingAsk = null; closeModal("askModalBg"); $("askInput").value = ""; }
+$("askSend").onclick = () => $("askInput").value.trim() && answerAsk($("askInput").value.trim());
+$("askInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && $("askInput").value.trim()) answerAsk($("askInput").value.trim()); });
+
+function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
+function renderAll() { renderTranscript(); renderStatus(); renderMemory(); renderMesh(); }
+connect();
+</script>
+</body>
+</html>

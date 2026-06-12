@@ -53,6 +53,11 @@ rendered dimmed, never scanned for tool calls.
   via browser_evaluate → screenshots for the human).
 - `ui/App.tsx` — single-file Ink UI (transcript, custom input, permission/ask prompts,
   statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf.
+- `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
+  via `with {type:"text"}`; `session.ts` WebSession wraps GrayskullAgent with a WS
+  bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask
+  maps). Agent-mesh events come from the `monitor` callback in `agents/runner.ts`.
+  Frontend is one self-contained ui.html (vanilla JS, matrix rain, SVG node graph).
 
 ## Conventions
 

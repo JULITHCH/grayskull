@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ChatMessage, ToolContext, ToolDef } from "../types";
+import type { AgentMonitorEvent, ChatMessage, ToolContext, ToolDef } from "../types";
 import type { LlmClient } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import { runToolLoop } from "../agent/loop";
@@ -44,9 +44,13 @@ export function registerAgentTools(opts: {
   client: LlmClient;
   registry: ToolRegistry;
   concurrency: number;
+  /** live agent-mesh feed (web UI); no-op when absent */
+  monitor?: (ev: AgentMonitorEvent) => void;
 }): void {
   const { cwd, client, registry } = opts;
+  const monitor = opts.monitor ?? (() => {});
   const semaphore = new Semaphore(opts.concurrency);
+  let spawnCounter = 0;
 
   const createAgentTool: ToolDef = {
     name: "create_agent",
@@ -87,8 +91,10 @@ export function registerAgentTools(opts: {
         const names = loadAgents(cwd).map((a) => a.name).join(", ") || "(none)";
         return `error: no agent named "${agentName}". Existing agents: ${names}. Create one with create_agent.`;
       }
+      const spawnId = `${agentName}-${++spawnCounter}`;
       return semaphore.run(async () => {
         ctx.note(`⚔ ${agentName} → ${task.slice(0, 80)}`);
+        monitor({ kind: "spawn", id: spawnId, agent: agentName, task });
         const messages: ChatMessage[] = [
           {
             role: "system",
@@ -111,8 +117,10 @@ export function registerAgentTools(opts: {
           schemas: registry.schemas(allowed),
           messages,
           ctx: subCtx,
+          onTextDelta: (text) => monitor({ kind: "delta", id: spawnId, agent: agentName, text }),
           // sub-agent work must be visible in the main transcript
           onToolEvent: (i) => {
+            monitor({ kind: "tool", id: spawnId, agent: agentName, detail: i.detail, state: i.state });
             if (i.state === "done" || i.state === "error") {
               ctx.note(`  ⚔ ${agentName} · ${i.detail}`);
             }
@@ -120,6 +128,7 @@ export function registerAgentTools(opts: {
         });
         ctx.note(`⚔ ${agentName} done`);
         const report = result || "(agent produced no report)";
+        monitor({ kind: "done", id: spawnId, agent: agentName, report: report.slice(0, 2000) });
         return report.length > SUB_AGENT_MAX_RESULT
           ? report.slice(0, SUB_AGENT_MAX_RESULT) + "\n[report truncated]"
           : report;

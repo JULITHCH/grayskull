@@ -5,12 +5,15 @@
   "type": "module",
   "private": true,
   "bin": {
-    "grayskull": "src/index.tsx"
+    "grayskull": "src/index.tsx",
+    "grayskull-web": "src/web/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.tsx",
+    "web": "bun run src/web/index.ts",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/index.tsx --compile --outfile dist/grayskull"
+    "build": "bun build src/index.tsx --compile --outfile dist/grayskull",
+    "build:web": "bun build src/web/index.ts --compile --outfile dist/grayskull-web"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -251,6 +251,30 @@ model can't impose on itself:
   first run: `full-dev` (the pipeline above) and `quick` (`plan -> implement -> test`).
 - Statusline shows `⛓ name 3/7` during a run, `⛓ name [shared]` while sticky.
 
+## Web UI — grayskull-web
+
+```sh
+grayskull-web          # serves on http://0.0.0.0:4242  (grayskull-web <port> to override)
+```
+
+Matrix-style control room in the browser (single self-contained page, Bun-native
+WebSockets, zero frontend build):
+
+- **multiple live sessions** — left panel; each runs a full agent (own cwd, settings,
+  memory, MCP, permissions), create more with + NEW SESSION
+- **chat** with token streaming, dimmed reasoning stream, colorized diffs, tool cards
+- **AGENT MESH** (right) — live node graph: the GRAYSKULL core, every spawned sub-agent
+  (⚔) and MCP server (⇄) as nodes; edges animate while a node works, nodes glow amber
+  on activity and fade when done. **Click any node** → modal with its live activity log
+  (spawn task, every tool call, streamed output, final report)
+- **MEMORY ACTIVATION** panel — global vault + project memory, live after every turn
+- permission and ask_user requests pop as modals (y/a/n keys work)
+- mode buttons incl. KAMIKAZEEE — which flips the whole UI into a red-alert theme,
+  matrix rain included
+- digital rain + CRT scanlines, session replay on reconnect, esc interrupts
+
+No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
+
 ## Context management
 
 - Live `ctx %` in the statusline (real prompt-token usage from vLLM).

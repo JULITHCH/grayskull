@@ -53,6 +53,13 @@ export interface Usage {
   completionTokens: number;
 }
 
+/** Live sub-agent activity, consumed by the web UI's agent mesh. */
+export type AgentMonitorEvent =
+  | { kind: "spawn"; id: string; agent: string; task: string }
+  | { kind: "tool"; id: string; agent: string; detail: string; state: string }
+  | { kind: "delta"; id: string; agent: string; text: string }
+  | { kind: "done"; id: string; agent: string; report: string };
+
 export interface AgentDef {
   name: string;
   description: string;

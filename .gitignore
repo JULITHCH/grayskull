@@ -35,3 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # grayskull local state
 .grayskull/
+
+# playwright MCP artifacts
+.playwright-mcp/
