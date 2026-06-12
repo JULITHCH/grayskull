@@ -173,6 +173,23 @@ Declared in settings (global or per project):
 Tools appear to the model as `mcp__<server>__<tool>`. `/mcp` shows status,
 `/mcp reconnect <name>` reconnects. Connection failures are reported, never fatal.
 
+## Code intelligence (always on, full auto)
+
+Three layers that catch weak-model mistakes mechanically:
+
+- **Auto-diagnostics** — after every `edit`/`write` the project's check runs and failures
+  are injected into the tool result, so the model fixes its own breakage in the same
+  turn. Auto-detected per project: `typecheck` script → `bunx tsc --noEmit` →
+  `cargo check` → `go vet` → `ruff`; override or disable via
+  `"diagnostics": { "command": "...", "enabled": false }` in local settings.
+- **LSP (mcp-language-server)** — semantic navigation: `definition`, `references`,
+  `hover`, `rename_symbol`, `diagnostics`, `edit_file`. Attaches automatically per
+  project type (`lsp-ts` when a `tsconfig.json` exists, `lsp-go` for `go.mod`) — the
+  `if` field on any MCP server config gates it on a marker file, and `${cwd}` in args
+  resolves per session. The system prompt steers the model to LSP over grep.
+- **Context7** — current, version-specific library docs (`resolve-library-id` →
+  `get-library-docs`); kills stale-API hallucinations and feeds the memory distiller.
+
 ## Browser testing (Playwright MCP)
 
 The seeded global settings include a `playwright` MCP server

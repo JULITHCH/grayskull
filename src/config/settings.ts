@@ -13,13 +13,17 @@ const McpServerSchema = z.union([
     url: z.string(),
     alwaysOn: z.boolean().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    /** only connect when this file exists in the project (e.g. "tsconfig.json") */
+    if: z.string().optional(),
   }),
   z.object({
     type: z.literal("stdio").optional(),
     command: z.string(),
+    /** "${cwd}" inside args is replaced with the session's project directory */
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
     alwaysOn: z.boolean().optional(),
+    if: z.string().optional(),
   }),
 ]);
 
@@ -71,14 +75,24 @@ export const SettingsSchema = z.object({
       deny: z.array(z.string()).default([]),
     })
     .default({ allow: [], deny: [] }),
+  /** post-edit project check injected into tool results (auto-detected) */
+  diagnostics: z
+    .object({
+      enabled: z.boolean().default(true),
+      command: z.string().optional(),
+    })
+    .default({ enabled: true }),
   mcpServers: z.record(z.string(), McpServerSchema).default({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
 export type McpServerConfig = z.infer<typeof McpServerSchema>;
 
-/** searxng web search ships on by default and is always connected.
- *  mcp-searxng bridges MCP(stdio) → the searxng instance on port 8080. */
+/** Always-on stack:
+ *  - searxng: web search+fetch (bridged to the instance on :8080)
+ *  - context7: up-to-date version-specific library docs
+ *  - lsp-ts / lsp-go: semantic code navigation + diagnostics, connected only
+ *    when the project matches (`if` marker file); "${cwd}" resolves per session */
 const BUILTIN_MCP: Record<string, McpServerConfig> = {
   searxng: {
     type: "stdio",
@@ -87,9 +101,27 @@ const BUILTIN_MCP: Record<string, McpServerConfig> = {
     env: { SEARXNG_URL: "http://127.0.0.1:8080" },
     alwaysOn: true,
   },
+  context7: {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "@upstash/context7-mcp"],
+    alwaysOn: true,
+  },
+  "lsp-ts": {
+    type: "stdio",
+    command: `${process.env["HOME"]}/go/bin/mcp-language-server`,
+    args: ["--workspace", "${cwd}", "--lsp", "typescript-language-server", "--", "--stdio"],
+    if: "tsconfig.json",
+  },
+  "lsp-go": {
+    type: "stdio",
+    command: `${process.env["HOME"]}/go/bin/mcp-language-server`,
+    args: ["--workspace", "${cwd}", "--lsp", `${process.env["HOME"]}/go/bin/gopls`],
+    if: "go.mod",
+  },
 };
 
-const BUILTIN_ALLOW = ["mcp__searxng__*"];
+const BUILTIN_ALLOW = ["mcp__searxng__*", "mcp__context7__*", "mcp__lsp-ts__*", "mcp__lsp-go__*"];
 
 function readJson(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
@@ -142,6 +174,9 @@ Core rules:
 - Prefer small verifiable steps: read before you edit, run code after you change it.
 - Use the todo tool to track multi-step work; update it as you go.
 - Use the web whenever you are unsure about an API, version, or fact — do not answer from stale knowledge. Search with mcp__searxng__searxng_web_search, then FETCH the most promising 1-2 results with mcp__searxng__web_url_read and base your answer on the fetched page content, not on search snippets alone. Snippets lie; pages don't.
+- Before using a library API you are not 100% sure about, get its CURRENT docs: mcp__context7__resolve-library-id with the library name, then mcp__context7__get-library-docs. This beats guessing and usually beats web search for API signatures.
+- When mcp__lsp-* tools are available, prefer them over grep for code navigation: definition/references find the actual symbol, not strings. Use the LSP diagnostics tool after larger changes; rename_symbol for renames instead of multiple edits.
+- If a tool result contains [auto-diagnostics ... FAILED], fix those errors immediately before doing anything else.
 - Keep responses short. No filler. Report what you did and what you found.
 - When the user asks you to create an agent, call create_agent with a focused system prompt, then use spawn_agent to run it (once per file/module when the user asks to iterate over the project).
 

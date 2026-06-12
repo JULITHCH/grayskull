@@ -8,6 +8,7 @@ import type { MemoryManager } from "../memory/memory";
 import { detectGlobalTrigger } from "../memory/memory";
 import { validateCall, recoverTextToolCall } from "./repair";
 import { needsCompaction, compact } from "./compact";
+import { runDiagnostics } from "./diagnostics";
 import { spawnSync } from "node:child_process";
 
 const MAX_LOOP_TURNS = 40;
@@ -125,7 +126,13 @@ export async function runToolLoop(opts: {
 
       opts.onToolEvent?.({ ...item });
       try {
-        const result = await tool.execute(args, ctx);
+        let result = await tool.execute(args, ctx);
+        // compiler feedback loop: file changes trigger the project check,
+        // failures land in the same tool result (applies to sub-agents too)
+        if (tool.kind === "edit" && !result.startsWith("error:")) {
+          const diag = runDiagnostics(ctx.cwd);
+          if (diag) result += `\n\n${diag}`;
+        }
         item.state = "done";
         item.result = result;
         opts.onToolEvent?.({ ...item });

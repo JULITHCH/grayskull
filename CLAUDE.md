@@ -21,6 +21,12 @@ rendered dimmed, never scanned for tool calls.
   memory extraction). UI talks to it via the mutable `UiBridge` object filled in by App.
 - `agent/repair.ts` — weak-model accommodations: zod-validated tool args with retry
   messages, recovery of tool calls emitted as plain text/`<tool_call>` blocks.
+- `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
+  (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
+  in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`
+  key in settings. MCP extras: `if` marker-file gating + `${cwd}` arg substitution in
+  `mcp/manager.ts`; built-ins lsp-ts/lsp-go (isaacphi/mcp-language-server, installed
+  at ~/go/bin) and context7 in `config/settings.ts`.
 - `tools/` — built-ins (bash/read/write/edit/grep/glob/ask_user/todo); `ToolRegistry.schemas()`
   converts zod → JSON Schema via `z.toJSONSchema` (zod 4). MCP tools carry raw `jsonSchema`.
 - `perms/engine.ts` — modes: normal / accept-edits / plan / kamikazeee (shift+tab cycle);

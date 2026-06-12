@@ -46,7 +46,7 @@ registry.register(skillTool(cwd));
 
 const perms = new PermissionEngine(settings);
 const memory = new MemoryManager(cwd, settings, client);
-const mcp = new McpManager(registry);
+const mcp = new McpManager(registry, cwd);
 const store = new SessionStore(cwd);
 
 // The App fills these in on mount; nothing calls them before first render.

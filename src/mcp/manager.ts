@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { McpServerConfig, Settings } from "../config/settings";
 import type { ToolDef } from "../types";
 import type { ToolRegistry } from "../tools";
@@ -16,10 +18,12 @@ export class McpManager {
   private clients = new Map<string, Client>();
   readonly statuses = new Map<string, McpServerStatus>();
   private registry: ToolRegistry;
+  private cwd: string;
   onChange?: () => void;
 
-  constructor(registry: ToolRegistry) {
+  constructor(registry: ToolRegistry, cwd: string = process.cwd()) {
     this.registry = registry;
+    this.cwd = cwd;
   }
 
   /** Connect all configured servers; failures are reported, never fatal. */
@@ -32,6 +36,11 @@ export class McpManager {
   }
 
   async connect(name: string, cfg: McpServerConfig): Promise<void> {
+    // conditional servers (e.g. LSP) only attach to matching projects
+    if (cfg.if && !existsSync(join(this.cwd, cfg.if))) {
+      this.statuses.delete(name);
+      return;
+    }
     this.statuses.set(name, { name, state: "connecting", toolCount: 0 });
     this.onChange?.();
     try {
@@ -43,7 +52,7 @@ export class McpManager {
             })
           : new StdioClientTransport({
               command: cfg.command,
-              args: cfg.args ?? [],
+              args: (cfg.args ?? []).map((a) => a.replaceAll("${cwd}", this.cwd)),
               env: { ...process.env as Record<string, string>, ...cfg.env },
               stderr: "ignore",
             });

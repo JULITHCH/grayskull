@@ -74,7 +74,7 @@ export class WebSession {
     });
     this.perms = new PermissionEngine(this.settings);
     this.memory = new MemoryManager(cwd, this.settings, this.client);
-    this.mcp = new McpManager(registry);
+    this.mcp = new McpManager(registry, cwd);
     this.store = new SessionStore(cwd);
 
     const bridge: UiBridge = {
