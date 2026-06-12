@@ -22,8 +22,9 @@ body::after { /* CRT scanlines */
   content: ""; position: fixed; inset: 0; z-index: 50; pointer-events: none;
   background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.16) 2px 4px);
 }
-#app { position: relative; z-index: 1; display: grid; height: 100vh;
+#app { position: relative; z-index: 1; display: grid; height: 100vh; height: 100dvh;
   grid-template-columns: 220px 1fr 420px; grid-template-rows: 46px 1fr; gap: 8px; padding: 8px; }
+#tabs { display: none; }
 
 header { grid-column: 1 / 4; display: flex; align-items: center; gap: 16px;
   border: 1px solid var(--g-faint); background: var(--panel); padding: 0 14px; }
@@ -142,6 +143,32 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
 #toast { position: fixed; bottom: 16px; right: 16px; z-index: 200; color: var(--red); display: none;
   border: 1px solid var(--red); background: rgba(20,0,4,.9); padding: 8px 14px; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--g-faint); }
+
+/* ── mobile: single panel + bottom tab bar ──────────────────── */
+@media (max-width: 900px) {
+  body { font-size: 14px; }
+  #app { grid-template-columns: 1fr; grid-template-rows: 40px 1fr 46px; gap: 6px; padding: 6px; }
+  header { grid-column: 1; padding: 0 8px; gap: 8px; overflow: hidden; }
+  header .logo { font-size: 13px; letter-spacing: 2px; }
+  #modelChip { display: none; }
+  #right { display: contents; }                /* children become grid items */
+  #sessions, #main, #mesh, #memPanel, #ops { grid-row: 2; grid-column: 1; display: none; min-height: 0; }
+  body[data-tab="chat"] #main { display: flex; }
+  body[data-tab="sess"] #sessions { display: flex; }
+  body[data-tab="mesh"] #mesh { display: flex; }
+  body[data-tab="brain"] #memPanel { display: flex; }
+  body[data-tab="ops"] #ops { display: flex; }
+  #tabs { display: flex; grid-row: 3; grid-column: 1; gap: 6px; }
+  #tabs button { flex: 1; background: var(--panel); border: 1px solid var(--g-faint); color: var(--g-dim);
+    font-family: inherit; font-size: 11px; letter-spacing: 1px; cursor: pointer; padding: 0; }
+  #tabs button.active { color: var(--g); border-color: var(--g); text-shadow: 0 0 6px var(--g); }
+  button.btn, .modeBtn { padding: 9px 12px; }  /* touch targets */
+  .modeBtn { font-size: 9px; padding: 6px 6px; }
+  #statusBar { flex-wrap: wrap; gap: 8px; }
+  #promptInput { font-size: 16px; }            /* prevents iOS zoom-on-focus */
+  .modal { width: 96vw; max-height: 90vh; }
+  #rain { opacity: .3; }
+}
 </style>
 </head>
 <body>
@@ -225,6 +252,14 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
     <button class="btn" id="askSend">ANSWER</button>
   </div>
 </div></div>
+
+<nav id="tabs">
+  <button data-tab="chat" class="active">CHAT</button>
+  <button data-tab="sess">SESS</button>
+  <button data-tab="mesh">MESH</button>
+  <button data-tab="brain">BRAIN</button>
+  <button data-tab="ops">OPS</button>
+</nav>
 
 <div id="toast"></div>
 
@@ -615,6 +650,20 @@ function renderOps() {
   }
   $("opsBody").innerHTML = html || "(idle — chains and todos appear here live)";
 }
+
+/* ── mobile tabs ─────────────────────────────────────────────── */
+document.body.dataset.tab = "chat";
+document.querySelectorAll("#tabs button").forEach((b) => {
+  b.onclick = () => {
+    document.body.dataset.tab = b.dataset.tab;
+    document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
+    // svg panels measure 0x0 while hidden — re-render once visible
+    requestAnimationFrame(() => { renderMesh(); renderMemory(); renderOps(); renderTranscript(); });
+  };
+});
+// jump back to chat when a session is picked on mobile
+const _select = selectSession;
+selectSession = (sid) => { _select(sid); if (innerWidth <= 900) document.querySelector('#tabs button[data-tab="chat"]')?.click(); };
 
 function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
 function renderAll() { renderTranscript(); renderStatus(); renderMemory(); renderMesh(); renderOps(); }
