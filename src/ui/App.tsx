@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Static, Text, useApp, useInput } from "ink";
 import type { PermissionMode, TranscriptItem } from "../types";
 import { MODE_ORDER } from "../types";
 import type { Settings } from "../config/settings";
@@ -56,7 +56,8 @@ const MODE_STYLE: Record<PermissionMode, { label: string; color: string }> = {
 };
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const MAX_RENDERED_ITEMS = 60;
+const STREAM_TAIL_LINES = 8;
+const STREAM_FLUSH_MS = 80;
 
 type QueuedWork =
   | { kind: "prompt"; text: string }
@@ -89,7 +90,14 @@ export function App(props: AppProps): React.ReactElement {
   const { cwd, settings, agent, bridge, memory, mcp, perms, client, store } = props;
   const { exit } = useApp();
 
-  const [items, setItems] = useState<TranscriptItem[]>([]);
+  // finished items go to <Static> — printed once, never re-rendered (anti-flicker);
+  // only running tools + the stream tail + prompts live in the dynamic region
+  const [staticItems, setStaticItems] = useState<TranscriptItem[]>([
+    { type: "banner", text: BANNER, color: "yellow" },
+    { type: "banner", text: `  ${TAGLINE}`, color: "yellow" },
+    { type: "note", text: `  ${settings.model} · ${settings.baseURL} · /help for commands` },
+  ]);
+  const [runningTools, setRunningTools] = useState<Array<TranscriptItem & { type: "tool" }>>([]);
   const [streamText, setStreamText] = useState("");
   const [streamReason, setStreamReason] = useState("");
   const [input, setInput] = useState("");
@@ -110,22 +118,21 @@ export function App(props: AppProps): React.ReactElement {
   const historyRef = useRef<string[]>(loadPromptHistory(cwd));
   const histIdxRef = useRef<number | null>(null);
   const draftRef = useRef("");
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pushItem = (item: TranscriptItem) => {
-    setItems((prev) => {
-      // tool items arrive twice (running → done): replace the running card
-      if (item.type === "tool") {
-        for (let i = prev.length - 1; i >= 0 && i >= prev.length - 10; i--) {
-          const p = prev[i];
-          if (p && p.type === "tool" && p.detail === item.detail && p.state === "running") {
-            const next = [...prev];
-            next[i] = item;
-            return next;
-          }
-        }
+    // tool items arrive twice (running → done): keep running ones in the
+    // dynamic region, finalize into <Static> when they complete
+    if (item.type === "tool") {
+      if (item.state === "running") {
+        setRunningTools((prev) => [...prev.filter((t) => t.detail !== item.detail), item]);
+      } else {
+        setRunningTools((prev) => prev.filter((t) => t.detail !== item.detail));
+        setStaticItems((prev) => [...prev, item]);
       }
-      return [...prev, item];
-    });
+      return;
+    }
+    setStaticItems((prev) => [...prev, item]);
   };
 
   const setMode = (m: PermissionMode) => {
@@ -141,7 +148,13 @@ export function App(props: AppProps): React.ReactElement {
     bridge.pushItem = pushItem;
     bridge.assistantDelta = (delta) => {
       streamRef.current += delta;
-      setStreamText(streamRef.current);
+      // throttle: flushing every token redraws the live region too often
+      if (!flushTimerRef.current) {
+        flushTimerRef.current = setTimeout(() => {
+          flushTimerRef.current = null;
+          setStreamText(streamRef.current);
+        }, STREAM_FLUSH_MS);
+      }
     };
     bridge.reasoningDelta = (delta) => {
       // show the think-stream dimmed while it runs; it is not kept
@@ -152,6 +165,10 @@ export function App(props: AppProps): React.ReactElement {
       const text = streamRef.current;
       streamRef.current = "";
       reasonRef.current = "";
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
       setStreamText("");
       setStreamReason("");
       if (text.trim()) pushItem({ type: "assistant", text });
@@ -235,7 +252,7 @@ export function App(props: AppProps): React.ReactElement {
         store,
         push: pushItem,
         setMode,
-        clearTranscript: () => setItems([]),
+        clearTranscript: () => setStaticItems([]),
         exit: () => {
           void mcp.closeAll();
           exit();
@@ -375,30 +392,20 @@ export function App(props: AppProps): React.ReactElement {
   );
   const mcpConnected = [...mcp.statuses.values()].filter((s) => s.state === "connected").length;
   const todoOpen = todoState.items.filter((i) => !i.done).length;
+  const streamTail = streamText.split("\n").slice(-STREAM_TAIL_LINES).join("\n");
   const chainChip = chainState.running
     ? `⛓ ${chainState.running.name} ${chainState.running.step}/${chainState.running.total}`
     : chainState.sticky
       ? `⛓ ${chainState.sticky.def.name} [${chainState.sticky.mode}]`
       : "";
-  const visibleItems = items.slice(-MAX_RENDERED_ITEMS);
-
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" marginBottom={1}>
-        <Text color="yellow">{BANNER}</Text>
-        <Text color="yellow" bold>
-          {"  "}{TAGLINE}
-        </Text>
-        <Text dimColor>
-          {"  "}{settings.model} · {settings.baseURL} · /help for commands
-        </Text>
-      </Box>
+      <Static items={staticItems}>
+        {(item, i) => <TranscriptLine key={i} item={item} />}
+      </Static>
 
-      {items.length > visibleItems.length && (
-        <Text dimColor>… {items.length - visibleItems.length} earlier entries …</Text>
-      )}
-      {visibleItems.map((item, i) => (
-        <TranscriptLine key={items.length - visibleItems.length + i} item={item} />
+      {runningTools.map((item) => (
+        <TranscriptLine key={item.detail} item={item} />
       ))}
 
       {streamReason !== "" && streamText === "" && (
@@ -409,9 +416,9 @@ export function App(props: AppProps): React.ReactElement {
         </Box>
       )}
 
-      {streamText !== "" && (
+      {streamTail !== "" && (
         <Box marginTop={1}>
-          <Text>{streamText}</Text>
+          <Text>{streamTail}</Text>
         </Box>
       )}
 
@@ -498,16 +505,22 @@ function TranscriptLine({ item }: { item: TranscriptItem }): React.ReactElement 
       const color = item.state === "error" || item.state === "denied" ? "red" : "cyan";
       const resultLines = (item.result ?? "").split("\n");
       const snippet = resultLines.slice(0, 3).join("\n");
+      const showDiff = item.state === "done" && item.preview;
       return (
         <Box flexDirection="column">
           <Text color={color}>
             {icon} {item.detail}
           </Text>
-          {item.state !== "running" && snippet && (
-            <Text dimColor>
-              {"  "}{snippet.slice(0, 300)}
-              {resultLines.length > 3 || (item.result ?? "").length > 300 ? " …" : ""}
-            </Text>
+          {showDiff ? (
+            <DiffView patch={item.preview!} />
+          ) : (
+            item.state !== "running" &&
+            snippet && (
+              <Text dimColor>
+                {"  "}{snippet.slice(0, 300)}
+                {resultLines.length > 3 || (item.result ?? "").length > 300 ? " …" : ""}
+              </Text>
+            )
           )}
         </Box>
       );
@@ -536,20 +549,37 @@ function TranscriptLine({ item }: { item: TranscriptItem }): React.ReactElement 
   }
 }
 
+/** Colorized unified diff, headers stripped, capped — Claude Code style. */
+function DiffView({ patch, maxLines = 30 }: { patch: string; maxLines?: number }): React.ReactElement {
+  const lines = patch
+    .split("\n")
+    .filter((l) => !/^(Index:|={3,}|---|\+\+\+)/.test(l) && l !== "\\ No newline at end of file");
+  const shown = lines.slice(0, maxLines);
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      {shown.map((l, i) => (
+        <Text
+          key={i}
+          color={l.startsWith("+") ? "green" : l.startsWith("-") ? "red" : l.startsWith("@@") ? "cyan" : undefined}
+          dimColor={!l.startsWith("+") && !l.startsWith("-")}
+        >
+          {l || " "}
+        </Text>
+      ))}
+      {lines.length > maxLines && <Text dimColor>… {lines.length - maxLines} more diff lines</Text>}
+    </Box>
+  );
+}
+
 function PermissionPrompt({ pending }: { pending: PendingPermission }): React.ReactElement {
-  const previewLines = (pending.req.preview ?? "").split("\n").slice(0, 25);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
       <Text color="yellow" bold>
         permission: {pending.req.detail}
       </Text>
-      {previewLines.length > 0 && pending.req.preview && (
-        <Box flexDirection="column" marginTop={1}>
-          {previewLines.map((l, i) => (
-            <Text key={i} color={l.startsWith("+") ? "green" : l.startsWith("-") ? "red" : undefined} dimColor={!l.startsWith("+") && !l.startsWith("-")}>
-              {l}
-            </Text>
-          ))}
+      {pending.req.preview && (
+        <Box marginTop={1}>
+          <DiffView patch={pending.req.preview} maxLines={25} />
         </Box>
       )}
       <Text dimColor>[y]es · [a]lways this session · [n]o</Text>

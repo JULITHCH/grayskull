@@ -108,6 +108,10 @@ export async function runToolLoop(opts: {
         detail: tool.describeCall(args),
         state: "running",
       };
+      // edits/writes carry their diff into the transcript (Claude Code style)
+      if (tool.previewCall) {
+        item.preview = await tool.previewCall(args, ctx.cwd).catch(() => undefined);
+      }
 
       if (opts.decide) {
         const verdict = await opts.decide(tool.name, args);
