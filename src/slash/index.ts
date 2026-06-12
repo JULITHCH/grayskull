@@ -278,7 +278,17 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "exit",
-    description: "quit",
+    description: "quit (also /quit, /bye)",
+    run: async (ctx) => ctx.exit(),
+  },
+  {
+    name: "quit",
+    description: "alias for /exit",
+    run: async (ctx) => ctx.exit(),
+  },
+  {
+    name: "bye",
+    description: "alias for /exit",
     run: async (ctx) => ctx.exit(),
   },
 ];

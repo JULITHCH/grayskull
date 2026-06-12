@@ -67,7 +67,7 @@ agent.skillListing = () => skillListing(cwd);
 // connect MCP in the background; searxng is on by default
 void mcp.connectAll(settings);
 
-render(
+const instance = render(
   <App
     cwd={cwd}
     settings={settings}
@@ -82,3 +82,11 @@ render(
   />,
   { exitOnCtrlC: true },
 );
+
+// Open handles (MCP children, hub websocket, retry timers) keep the process
+// alive after Ink unmounts — /exit and ctrl+c both land here for a real exit.
+void instance.waitUntilExit().then(async () => {
+  link.stop();
+  await Promise.race([mcp.closeAll(), new Promise((r) => setTimeout(r, 1500))]);
+  process.exit(0);
+});

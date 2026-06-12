@@ -395,10 +395,9 @@ export function App(props: AppProps): React.ReactElement {
         push: pushItem,
         setMode,
         clearTranscript: () => setStaticItems([]),
-        exit: () => {
-          void mcp.closeAll();
-          exit();
-        },
+        // real teardown (MCP, hub link, process.exit) runs in index.tsx
+        // via waitUntilExit once Ink unmounts
+        exit: () => exit(),
       };
       const result = await runSlashCommand(ctx, text);
       if (result === "unknown") {
