@@ -95,7 +95,14 @@ function mcpToolDef(
     // searxng is search/fetch only; other servers are read-only only if they say so
     kind: readOnly || server === "searxng" ? "read" : "execute",
     jsonSchema: inputSchema,
-    describeCall: (args) => `${name}(${JSON.stringify(args).slice(0, 80)})`,
+    describeCall: (args) => {
+      // web search/fetch must be obvious in the transcript, not JSON soup
+      if (server === "searxng") {
+        if (typeof args["query"] === "string") return `🔍 websearch(${args["query"]})`;
+        if (typeof args["url"] === "string") return `🌐 fetch(${args["url"]})`;
+      }
+      return `${name}(${JSON.stringify(args).slice(0, 80)})`;
+    },
     execute: async (args) => {
       const result = await client.callTool({ name: toolName, arguments: args });
       const parts: string[] = [];

@@ -111,6 +111,12 @@ export function registerAgentTools(opts: {
           schemas: registry.schemas(allowed),
           messages,
           ctx: subCtx,
+          // sub-agent work must be visible in the main transcript
+          onToolEvent: (i) => {
+            if (i.state === "done" || i.state === "error") {
+              ctx.note(`  ⚔ ${agentName} · ${i.detail}`);
+            }
+          },
         });
         ctx.note(`⚔ ${agentName} done`);
         const report = result || "(agent produced no report)";
