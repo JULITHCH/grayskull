@@ -151,6 +151,7 @@ export class WebSession {
       ctxPct: Math.min(100, Math.round((this.client.lastPromptTokens / this.settings.contextWindow) * 100)),
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: this.settings.model,
+      thinking: this.settings.enableThinking,
       todo: this.todoState.items,
       // chainState is process-global; only claim it while this session works
       chain: this.busy ? chainState.running : null,
@@ -238,8 +239,9 @@ export class WebSession {
     // /tc off clears the global sticky; mirror it per-session
     if (/^\/(tc|thinkingchain)\s+off\b/.test(text)) {
       this.sticky = null;
-      this.sendStatus();
     }
+    // reflect any setting a command may have changed (e.g. /thinking)
+    this.sendStatus();
   }
 
   private async drain(): Promise<void> {

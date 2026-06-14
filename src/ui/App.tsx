@@ -178,6 +178,7 @@ export function App(props: AppProps): React.ReactElement {
       ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
+      thinking: settings.enableThinking,
       todo: todoState.items,
       chain: runningRef.current ? chainState.running : null,
       sticky: chainState.sticky
@@ -416,6 +417,8 @@ export function App(props: AppProps): React.ReactElement {
           });
         }
       }
+      // mirror any setting a command changed (e.g. /thinking) to the hub
+      publishStatus();
       return;
     }
     submitToAgent(text);
@@ -600,6 +603,7 @@ export function App(props: AppProps): React.ReactElement {
         </Text>
         <Text dimColor>
           {hubConnected ? "⇄ web · " : ""}
+          {settings.enableThinking ? <Text color="cyan">∴ think · </Text> : null}
           {chainChip ? (
             <Text color="magenta">{chainChip}{" · "}</Text>
           ) : null}

@@ -204,6 +204,24 @@ export const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "thinking",
+    description: "toggle model thinking mode: /thinking [on|off]",
+    run: async (ctx, args) => {
+      const arg = args.trim().toLowerCase();
+      if (arg === "on" || arg === "off") {
+        ctx.settings.enableThinking = arg === "on";
+      } else if (arg === "" || arg === "toggle") {
+        ctx.settings.enableThinking = !ctx.settings.enableThinking;
+      } else if (arg !== "status") {
+        return note(ctx, "usage: /thinking [on|off|status]");
+      }
+      note(
+        ctx,
+        `thinking is ${ctx.settings.enableThinking ? "ON — model reasons before answering (slower, dimmed reasoning shown)" : "OFF"}`,
+      );
+    },
+  },
+  {
     name: "agents",
     description: "list agents; /agents edit|delete <name>",
     run: async (ctx, args) => {

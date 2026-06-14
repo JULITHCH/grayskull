@@ -47,7 +47,7 @@ which adds the infra flags: `--load-format fastsafetensors`,
 prefix, so every turn after the first reuses the KV cache. `--reasoning-parser qwen3`
 splits think-blocks into a separate stream — grayskull renders them dimmed and never
 parses tool calls out of them; thinking is off by default (`"enableThinking": false`
-in settings flips it via `chat_template_kwargs`).
+in settings flips it via `chat_template_kwargs`, or toggle it live with `/thinking`).
 
 ---
 
@@ -352,6 +352,7 @@ full conversation. `/clear` wipes the current conversation and screen.
 | `/forget <pattern>` | prune project memory |
 | `/compact` | compact the conversation now |
 | `/mode [name]` | show or set permission mode |
+| `/thinking [on\|off]` | toggle the model's reasoning mode live (no restart) |
 | `/mcp [reconnect <name>]` | MCP status / reconnect |
 | `/agents [edit\|delete <name>]` | manage sub-agents |
 | `/skills` | list discovered skills |
