@@ -41,6 +41,28 @@ export function validateCall(tool: ToolDef, rawArgs: string): ValidationResult {
 }
 
 /**
+ * Make a tool call safe to store in history and REPLAY. GLM's vLLM server
+ * re-parses each prior tool call's `arguments` with json.loads when rendering
+ * the next request, and 400s on malformed/truncated JSON (a known GLM-4.5
+ * streaming quirk emits incomplete argument strings). Valid JSON is kept
+ * verbatim; empty or unparseable arguments are coerced to `{}` so the replay
+ * never fails. The original (possibly malformed) args still drive validateCall
+ * for execution, so the model still gets a useful repair message.
+ */
+export function sanitizeToolCallArgs(call: ToolCall): ToolCall {
+  const trimmed = (call.function.arguments ?? "").trim();
+  if (trimmed) {
+    try {
+      JSON.parse(trimmed);
+      return call;
+    } catch {
+      // fall through to coercion
+    }
+  }
+  return { ...call, function: { ...call.function, arguments: "{}" } };
+}
+
+/**
  * Recover a tool call the model emitted as plain text instead of a real
  * tool_calls entry. The leakage format is family-specific:
  *

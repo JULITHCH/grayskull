@@ -6,7 +6,7 @@ import type { ToolRegistry } from "../tools";
 import type { PermissionEngine } from "../perms/engine";
 import type { MemoryManager } from "../memory/memory";
 import { detectGlobalTrigger } from "../memory/memory";
-import { validateCall, recoverTextToolCall } from "./repair";
+import { validateCall, recoverTextToolCall, sanitizeToolCallArgs } from "./repair";
 import { needsCompaction, compact } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
@@ -77,10 +77,12 @@ export async function runToolLoop(opts: {
       if (recovered) toolCalls = [recovered];
     }
 
+    // store args sanitized to valid JSON so replaying them never 400s the GLM
+    // server; execution below still reads the raw `toolCalls` for repair hints
     messages.push({
       role: "assistant",
       content: result.text || null,
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(sanitizeToolCallArgs) } : {}),
     });
 
     if (toolCalls.length === 0) break;
