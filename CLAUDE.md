@@ -47,11 +47,18 @@ rendered dimmed, never scanned for tool calls.
   plugin cache); exposed as the `skill` tool + `/<name>` slash fallback. Frontmatter
   parser handles YAML block scalars (`description: >`).
 - `chains/` — /thinkingchain step pipelines: registry.ts (global `~/.config/grayskull/chains/*.md`,
-  `->` syntax, built-in step expansion table, gate detection via `review|test|verify`),
-  runner.ts (sequential execution, VERDICT PASS/FAIL gates with jump-back, shared vs
-  fresh context modes; `chainState` mutable object feeds the statusline). Shared mode
-  reuses `agent.runTurn`; fresh mode uses `agent.runIsolated` (no history/memory writes,
-  one summary at the end).
+  `->` syntax, built-in step expansion table, gate detection via `review|test|verify`,
+  per-step preset binding `stepPresetName`/`resolveStepProfile` + `profiles:` frontmatter
+  override), runner.ts (sequential execution, VERDICT PASS/FAIL gates with jump-back,
+  shared vs fresh context modes; applies each step's InferenceProfile via
+  `agent.setInferenceProfile` in a try/finally; `chainState` feeds the statusline).
+- `llm/profiles.ts` — model-family abstraction (`qwen3.5`/`glm4.5`): leak dialect,
+  vLLM parser flags (doc only), and `codegen`/`reason` inference presets (thinking +
+  sampling). `LlmClient.setInferenceProfile()` applies a transient per-request override
+  (temp/topP/topK/minP/enableThinking) over settings; `oneShot` never inherits it.
+  Selected by `settings.modelFamily` (default qwen3.5). GLM handoff: `glm-server-notes.md`.
+  `repair.ts` recoverTextToolCall takes the dialect: `qwen` (JSON) or `glm` (XML
+  `<tool_call>name<arg_key>/<arg_value>`).
 - `config/settings.ts` — zod schema, precedence: defaults < global < local settings.json.
   Seeded global settings include the playwright MCP server (headless Chrome, 23 tools);
   the `webtest` skill (examples/skills/, installed at ~/.config/grayskull/skills/)

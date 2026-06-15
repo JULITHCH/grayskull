@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { Settings } from "../config/settings";
+import type { InferenceProfile } from "./profiles";
 import type { ChatMessage, ToolCall, Usage } from "../types";
 
 export interface StreamCallbacks {
@@ -46,6 +47,8 @@ export class LlmClient {
   private settings: Settings;
   /** prompt tokens reported by vLLM for the latest request — feeds the statusline. */
   lastPromptTokens = 0;
+  /** transient per-request sampling+thinking override (set per chain step). */
+  private override: InferenceProfile | null = null;
 
   constructor(settings: Settings) {
     this.settings = settings;
@@ -57,6 +60,25 @@ export class LlmClient {
     });
   }
 
+  /** Apply a chain-step inference profile (thinking + sampling, flipped
+   *  together) to subsequent requests; pass null to revert to settings. */
+  setInferenceProfile(profile: InferenceProfile | null): void {
+    this.override = profile;
+  }
+
+  /** Effective sampling: the step override wins, else the session settings. */
+  private sampling(): { temperature: number; topP: number; topK: number; minP: number; enableThinking: boolean } {
+    const o = this.override;
+    const s = this.settings;
+    return {
+      temperature: o ? o.temperature : s.temperature,
+      topP: o ? o.topP : s.topP,
+      topK: o ? o.topK : s.topK,
+      minP: o ? o.minP : s.minP,
+      enableThinking: o ? o.enableThinking : s.enableThinking,
+    };
+  }
+
   async complete(
     messages: ChatMessage[],
     tools: ToolSchema[],
@@ -64,14 +86,15 @@ export class LlmClient {
     signal?: AbortSignal,
   ): Promise<CompletionResult> {
     const s = this.settings;
+    const samp = this.sampling();
     const stream = await this.client.chat.completions.create(
       {
         model: s.model,
         messages,
         stream: true,
         stream_options: { include_usage: true },
-        temperature: s.temperature,
-        top_p: s.topP,
+        temperature: samp.temperature,
+        top_p: samp.topP,
         max_tokens: s.maxTokens,
         ...(tools.length > 0
           ? {
@@ -140,17 +163,25 @@ export class LlmClient {
     return { text, toolCalls, usage };
   }
 
-  /** Single-shot, no tools, no streaming — used by memory extractor / compactor. */
+  /** Single-shot, no tools, no streaming — used by memory extractor / compactor.
+   *  Always deterministic and thinking-OFF; never inherits a chain-step override. */
   async oneShot(system: string, user: string, maxTokens = 4096): Promise<string> {
+    const s = this.settings;
     const res = await this.client.chat.completions.create({
-      model: this.settings.model,
+      model: s.model,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
       temperature: 0.3,
       max_tokens: maxTokens,
-      ...(this.vllmExtras() as Record<string, never>),
+      ...({
+        top_k: s.topK,
+        min_p: s.minP,
+        presence_penalty: s.presencePenalty,
+        repetition_penalty: s.repetitionPenalty,
+        chat_template_kwargs: { enable_thinking: false },
+      } as unknown as Record<string, never>),
     });
     return res.choices[0]?.message?.content ?? "";
   }
@@ -158,11 +189,14 @@ export class LlmClient {
   /** vLLM-specific request fields the OpenAI client doesn't type. */
   private vllmExtras(): Record<string, unknown> {
     const s = this.settings;
+    const samp = this.sampling();
     return {
-      top_k: s.topK,
+      top_k: samp.topK,
+      min_p: samp.minP,
       presence_penalty: s.presencePenalty,
       repetition_penalty: s.repetitionPenalty,
-      chat_template_kwargs: { enable_thinking: s.enableThinking },
+      // same kwarg name on Qwen3.5 and GLM-4.5; the profile sets it per step
+      chat_template_kwargs: { enable_thinking: samp.enableThinking },
     };
   }
 }

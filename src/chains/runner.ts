@@ -1,6 +1,6 @@
 import type { GrayskullAgent, UiBridge } from "../agent/loop";
 import type { MemoryManager } from "../memory/memory";
-import { expandStep, isGate, type ChainDef, type ChainContextMode } from "./registry";
+import { expandStep, isGate, stepPresetName, type ChainDef, type ChainContextMode } from "./registry";
 
 const MAX_GATE_RETRIES = 2;
 const HANDOFF_CAP = 4000;
@@ -98,12 +98,25 @@ export async function runChain(opts: {
     const directive = buildDirective({ chain, task, index: i, failReason, handoff });
     failReason = undefined;
 
+    // per-step inference profile: thinking + sampling flipped together
+    const preset = stepPresetName(step, chain);
+    const profile = agent.resolveChainStepProfile(step, chain);
+    agent.setInferenceProfile(profile);
+    ui.pushItem({
+      type: "note",
+      text: `⛓ profile: ${preset} (think:${profile.enableThinking ? "on" : "off"} · temp ${profile.temperature} · top_p ${profile.topP})`,
+    });
+
     let result: string;
-    if (mode === "shared") {
-      result = await agent.runTurn(directive);
-    } else {
-      result = await agent.runIsolated(directive);
-      ui.pushItem({ type: "note", text: `⛓ step ${i + 1} report captured (${result.length} chars)` });
+    try {
+      if (mode === "shared") {
+        result = await agent.runTurn(directive);
+      } else {
+        result = await agent.runIsolated(directive);
+        ui.pushItem({ type: "note", text: `⛓ step ${i + 1} report captured (${result.length} chars)` });
+      }
+    } finally {
+      agent.setInferenceProfile(null); // revert to session sampling between steps
     }
     reports[i] = `step ${i + 1} (${step}):\n${result}`;
 

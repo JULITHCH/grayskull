@@ -31,15 +31,19 @@ export const SettingsSchema = z.object({
   baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
   model: z.string().default("happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound"),
+  /** model family — selects leak-recovery dialect + chain-step sampling presets.
+   *  Switch to "glm4.5" (with baseURL :8001, model glm-4.5-air) for GLM-4.5-Air. */
+  modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
   contextWindow: z.number().default(196608),
   maxTokens: z.number().default(32768),
   // Qwen non-thinking coding preset
   temperature: z.number().default(0.7),
   topP: z.number().default(0.8),
   topK: z.number().default(20),
+  minP: z.number().default(0),
   presencePenalty: z.number().default(0),
   repetitionPenalty: z.number().default(1.0),
-  /** chat_template_kwargs.enable_thinking — server runs --reasoning-parser qwen3 */
+  /** chat_template_kwargs.enable_thinking (same kwarg on Qwen3.5 and GLM-4.5) */
   enableThinking: z.boolean().default(false),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),
   defaultMode: z.enum(["normal", "accept-edits", "plan", "kamikazeee"]).default("normal"),

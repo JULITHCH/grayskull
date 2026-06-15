@@ -10,6 +10,9 @@ import { validateCall, recoverTextToolCall } from "./repair";
 import { needsCompaction, compact } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
+import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
+import { resolveStepProfile } from "../chains/registry";
+import type { ChainDef } from "../chains/registry";
 import { spawnSync } from "node:child_process";
 
 const MAX_LOOP_TURNS = 40;
@@ -47,6 +50,8 @@ export async function runToolLoop(opts: {
   onToolEvent?: (item: TranscriptItem & { type: "tool" }) => void;
   /** null = auto-approve everything (sub-agents gate at spawn time) */
   decide?: (toolName: string, args: Record<string, unknown>) => Promise<{ allowed: boolean; reason?: string }>;
+  /** which plaintext tool-call leak format to recover (model-family specific) */
+  leakDialect?: LeakDialect;
 }): Promise<string> {
   const { client, registry, schemas, messages, ctx, signal } = opts;
   const knownTools = new Set(schemas.map((s) => s.name));
@@ -67,7 +72,7 @@ export async function runToolLoop(opts: {
 
     // weak-model recovery: tool call emitted as text instead of tool_calls
     if (toolCalls.length === 0 && result.text) {
-      const recovered = recoverTextToolCall(result.text, knownTools);
+      const recovered = recoverTextToolCall(result.text, knownTools, opts.leakDialect);
       if (recovered) toolCalls = [recovered];
     }
 
@@ -165,6 +170,22 @@ export class GrayskullAgent {
   agentListing: () => string = () => "";
   /** Set at startup; lists SKILL.md skills for the system prompt. */
   skillListing: () => string = () => "";
+
+  /** Tool-call leak dialect for this model family. */
+  get leakDialect(): LeakDialect {
+    return modelProfile(this.settings.modelFamily).leakDialect;
+  }
+
+  /** Resolve a chain step's inference profile (thinking + sampling) for this
+   *  model family, honouring per-chain overrides. */
+  resolveChainStepProfile(step: string, chain: ChainDef): InferenceProfile {
+    return resolveStepProfile(step, chain, this.settings.modelFamily);
+  }
+
+  /** Apply (or clear with null) a step's profile on the shared client. */
+  setInferenceProfile(profile: InferenceProfile | null): void {
+    this.client.setInferenceProfile(profile);
+  }
 
   constructor(opts: {
     cwd: string;
@@ -343,6 +364,7 @@ export class GrayskullAgent {
       client: this.client,
       registry: this.registry,
       schemas: this.registry.schemas(),
+      leakDialect: this.leakDialect,
       messages,
       ctx,
       signal,

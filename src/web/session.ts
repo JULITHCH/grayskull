@@ -19,6 +19,7 @@ import { memoryGraphData } from "../memory/scores";
 import { runChain, chainState } from "../chains/runner";
 import type { ChainDef, ChainContextMode } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
+import { modelProfile } from "../llm/profiles";
 
 /** slash commands that open $EDITOR or fzf — they would hang the server */
 const TERMINAL_ONLY = /^\/(system|settings|resume)\b|^\/(memory|agents|thinkingchain|tc)\s+edit\b/;
@@ -70,6 +71,7 @@ export class WebSession {
       client: this.client,
       registry,
       concurrency: this.settings.agentConcurrency,
+      leakDialect: modelProfile(this.settings.modelFamily).leakDialect,
       monitor: (ev) => this.send({ t: "agent", ev }),
     });
     this.perms = new PermissionEngine(this.settings);

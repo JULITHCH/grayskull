@@ -2,13 +2,18 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync, mkdir
 import { join } from "node:path";
 import { GLOBAL_CHAINS_DIR } from "../config/paths";
 
+import { modelProfile, type ModelFamily, type InferenceProfile } from "../llm/profiles";
+
 export type ChainContextMode = "shared" | "fresh";
+export type StepPreset = "codegen" | "reason";
 
 export interface ChainDef {
   name: string;
   description: string;
   steps: string[];
   context: ChainContextMode;
+  /** per-step preset overrides, keyed by lowercased step text or its first word */
+  profiles?: Record<string, StepPreset>;
   filePath: string;
 }
 
@@ -47,8 +52,20 @@ function parseChainFile(path: string): ChainDef | null {
     description: meta["description"] ?? "",
     steps,
     context: meta["context"] === "fresh" ? "fresh" : "shared",
+    profiles: parseProfilesMeta(meta["profiles"]),
     filePath: path,
   };
+}
+
+/** `profiles: implement=codegen, plan=reason` → { implement: "codegen", plan: "reason" } */
+function parseProfilesMeta(raw: string | undefined): Record<string, StepPreset> | undefined {
+  if (!raw) return undefined;
+  const out: Record<string, StepPreset> = {};
+  for (const part of raw.split(",")) {
+    const m = part.match(/^\s*([^=]+?)\s*=\s*(codegen|reason)\s*$/i);
+    if (m) out[m[1]!.toLowerCase()] = m[2]!.toLowerCase() as StepPreset;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function loadChains(): ChainDef[] {
@@ -71,19 +88,20 @@ export function saveChain(opts: {
   description?: string;
   steps: string[];
   context?: ChainContextMode;
+  profiles?: Record<string, StepPreset>;
 }): string {
   mkdirSync(GLOBAL_CHAINS_DIR, { recursive: true });
   const path = join(GLOBAL_CHAINS_DIR, `${opts.name}.md`);
-  const content = [
+  const meta = [
     "---",
     `name: ${opts.name}`,
     `description: ${opts.description ?? ""}`,
     `context: ${opts.context ?? "shared"}`,
-    "---",
-    "",
-    opts.steps.join("\n-> "),
-    "",
-  ].join("\n");
+  ];
+  if (opts.profiles && Object.keys(opts.profiles).length) {
+    meta.push(`profiles: ${Object.entries(opts.profiles).map(([k, v]) => `${k}=${v}`).join(", ")}`);
+  }
+  const content = [...meta, "---", "", opts.steps.join("\n-> "), ""].join("\n");
   writeFileSync(path, content);
   return path;
 }
@@ -157,6 +175,59 @@ export const BUILTIN_STEPS: Record<string, string> = {
   refactor:
     "Improve the structure of the code touched by this task without changing behavior: remove duplication, clarify names, simplify. Run a sanity check afterwards.",
 };
+
+// ---------------------------------------------------------------------------
+// per-step inference profiles
+//
+// codegen → thinking OFF (deterministic code); reason → thinking ON.
+// Default binding (overridable per chain via the `profiles:` frontmatter):
+//   implement / implementation / codegen / refactor / readme → codegen
+//   plan / review / diagnose / test / testing / verify / websearch → reason
+// Gates (review/test/verify) default to reason; unknown freeform steps default
+// to reason too (safer to think than not when intent is unclear).
+
+const STEP_PRESET: Record<string, StepPreset> = {
+  implement: "codegen",
+  implementation: "codegen",
+  codegen: "codegen",
+  refactor: "codegen",
+  readme: "codegen",
+  "create readme.md": "codegen",
+  document: "codegen",
+  plan: "reason",
+  review: "reason",
+  diagnose: "reason",
+  test: "reason",
+  testing: "reason",
+  verify: "reason",
+  websearch: "reason",
+  research: "reason",
+};
+
+/** Resolve a step's preset name: per-chain override > built-in binding > default. */
+export function stepPresetName(step: string, chain?: Pick<ChainDef, "profiles">): StepPreset {
+  const key = step.toLowerCase().trim();
+  const overrides = chain?.profiles;
+  if (overrides) {
+    if (overrides[key]) return overrides[key]!;
+    const first = key.split(/\s/)[0]!;
+    if (overrides[first]) return overrides[first]!;
+  }
+  if (STEP_PRESET[key]) return STEP_PRESET[key]!;
+  const first = key.split(/\s/)[0]!;
+  if (STEP_PRESET[first]) return STEP_PRESET[first]!;
+  return isGate(step) ? "reason" : "reason";
+}
+
+/** Resolve a step's full inference profile for a given model family. */
+export function resolveStepProfile(
+  step: string,
+  chain: Pick<ChainDef, "profiles">,
+  family: ModelFamily,
+): InferenceProfile {
+  const preset = stepPresetName(step, chain);
+  return modelProfile(family).presets[preset];
+}
 
 /** Built-in name → tuned instruction; freeform text used verbatim + modifiers. */
 export function expandStep(step: string): string {

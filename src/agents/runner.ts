@@ -3,6 +3,7 @@ import type { AgentMonitorEvent, ChatMessage, ToolContext, ToolDef } from "../ty
 import type { LlmClient } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import { runToolLoop } from "../agent/loop";
+import type { LeakDialect } from "../llm/profiles";
 import { loadAgents, writeAgentDef, DEFAULT_AGENT_TOOLS } from "./registry";
 import { autoMatchSkills, autoSkillBlock } from "../skills/registry";
 
@@ -45,6 +46,8 @@ export function registerAgentTools(opts: {
   client: LlmClient;
   registry: ToolRegistry;
   concurrency: number;
+  /** tool-call leak dialect for the model family (sub-agents share it) */
+  leakDialect?: LeakDialect;
   /** live agent-mesh feed (web UI); no-op when absent */
   monitor?: (ev: AgentMonitorEvent) => void;
 }): void {
@@ -123,6 +126,7 @@ export function registerAgentTools(opts: {
           client,
           registry,
           schemas: registry.schemas(allowed),
+          leakDialect: opts.leakDialect,
           messages,
           ctx: subCtx,
           onTextDelta: (text) => monitor({ kind: "delta", id: spawnId, agent: agentName, text }),

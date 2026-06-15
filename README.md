@@ -281,9 +281,33 @@ model can't impose on itself:
   - `shared` (default) — steps run in the main conversation, full visibility
   - `fresh` — each step gets an isolated context with a handoff summary of the previous
     steps; one combined summary lands in history and memory at the end
+- **Per-step inference profiles**: each step runs with a thinking + sampling preset,
+  flipped together. `implement`/`refactor`/`readme` → `codegen` (thinking OFF,
+  deterministic); `plan`/`review`/`diagnose`/`test`/`websearch` and gates → `reason`
+  (thinking ON). Presets come from the active model profile (see below). Override per
+  chain with a `profiles:` line in the chain file, e.g. `profiles: implement=reason`.
+  Each step's banner shows `⛓ profile: reason (think:on · temp 0.6 · top_p 0.95)`.
 - Chains are **global**: `~/.config/grayskull/chains/<name>.md`. Starters seeded on
   first run: `full-dev` (the pipeline above) and `quick` (`plan -> implement -> test`).
 - Statusline shows `⛓ name 3/7` during a run, `⛓ name [shared]` while sticky.
+
+## Model profiles — Qwen3.5 / GLM-4.5-Air
+
+`modelFamily` in settings selects a model profile that adapts three family-specific
+things: the plaintext tool-call **leak-recovery dialect**, the chain-step **sampling
+presets**, and the recorded vLLM **parser flags**. The thinking toggle
+(`chat_template_kwargs.enable_thinking`) is the same on both families.
+
+- `qwen3.5` (default) — leak dialect `qwen` (JSON `<tool_call>`/```json), parsers
+  `qwen3_xml` / `qwen3`.
+- `glm4.5` — leak dialect `glm` (GLM's `<tool_call>name<arg_key>/<arg_value></tool_call>`
+  XML), parsers `glm45` / `glm45`. Switch with
+  `{"modelFamily":"glm4.5","baseURL":"http://10.8.0.22:8001/v1","model":"glm-4.5-air"}`.
+
+This emulates "two models" from GLM-4.5-Air's hybrid reasoning: codegen steps run
+thinking-OFF, plan/diagnose/test run thinking-ON. See `glm-server-notes.md` for the
+verified GLM values and the server launch flags. Adding a family = one entry in
+`src/llm/profiles.ts`.
 
 ## Web UI — grayskull-web
 

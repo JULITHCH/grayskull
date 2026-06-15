@@ -10,6 +10,7 @@ import { McpManager } from "./mcp/manager";
 import { SessionStore } from "./session/store";
 import { GrayskullAgent, type UiBridge } from "./agent/loop";
 import { registerAgentTools } from "./agents/runner";
+import { modelProfile } from "./llm/profiles";
 import { agentListing } from "./agents/registry";
 import { skillTool } from "./skills/tool";
 import { skillListing } from "./skills/registry";
@@ -40,6 +41,7 @@ registerAgentTools({
   client,
   registry,
   concurrency: settings.agentConcurrency,
+  leakDialect: modelProfile(settings.modelFamily).leakDialect,
   monitor: (ev) => link.publish({ t: "agent", ev }),
 });
 registry.register(skillTool(cwd));
