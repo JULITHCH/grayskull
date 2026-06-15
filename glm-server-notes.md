@@ -22,13 +22,21 @@ grayskull presets (`glm4.5` profile):
 - `codegen` → thinking OFF, temp 0.2 / top_p 0.95 / top_k 40 / min_p 0 (deterministic code; GLM-4.5-Air does not publish a distinct non-thinking coding preset, so temp is lowered from the documented default — tune as desired)
 - `reason` → thinking ON, temp 0.6 / top_p 0.95 / top_k 40 / min_p 0 (GLM documented default)
 
-## TBD — fill from the vLLM server task (not run here)
+## Runtime (live-verified 2026-06-15 against the running server)
 
-- endpoint URL + port (task default `--port 8001`; same Spark → likely `http://10.8.0.22:8001/v1`)
-- served-model-name (task default `glm-4.5-air`)
-- pinned 4-bit quant + exact revision (NVFP4 preferred, else AWQ/GPTQ)
-- fitted `--max-model-len` and computed `--gpu-memory-utilization`
-- measured tokens/sec, thinking-on vs off
+- endpoint: `http://10.8.0.22:8001/v1`  ·  served-model-name: `glm-4.5-air`
+- `max_model_len`: **131072** (stepped down from the 196608 target to fit)
+- Phase 3/4 smoke: plain completion OK; tool call → proper OpenAI `tool_calls`
+  (NOT leaked as text); thinking toggle confirmed — `reasoning_content` populated
+  when on (~2271 chars), empty when off
+- Phase 5 (quick chain `plan → implement → test`, real collision bug, fixed 3/0):
+  plan = reason/think-on (1375ch reasoning, 19.1 tok/s);
+  implement = codegen/think-off (0 reasoning, 17.5 tok/s);
+  test = reason/think-on, gate enforced VERDICT: PASS, ran `bun run test:logic`.
+  Thinking mode roughly quadruples latency on reasoning-heavy prompts.
+
+Still TBD (server-task internal, not needed by grayskull): pinned quant + revision,
+the exact `--gpu-memory-utilization` used.
 
 Launch flags template (verified parser names; fill the bracketed runtime values):
 

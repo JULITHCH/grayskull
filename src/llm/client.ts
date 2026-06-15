@@ -47,6 +47,8 @@ export class LlmClient {
   private settings: Settings;
   /** prompt tokens reported by vLLM for the latest request — feeds the statusline. */
   lastPromptTokens = 0;
+  /** running total of completion tokens (for per-step throughput reporting). */
+  cumCompletionTokens = 0;
   /** transient per-request sampling+thinking override (set per chain step). */
   private override: InferenceProfile | null = null;
 
@@ -150,7 +152,10 @@ export class LlmClient {
       }
     }
 
-    if (usage) this.lastPromptTokens = usage.promptTokens;
+    if (usage) {
+      this.lastPromptTokens = usage.promptTokens;
+      this.cumCompletionTokens += usage.completionTokens;
+    }
 
     const toolCalls: ToolCall[] = [...toolFrags.entries()]
       .sort(([a], [b]) => a - b)
