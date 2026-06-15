@@ -11,6 +11,7 @@ import { needsCompaction, compact } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
+import type { ModelPreset } from "../config/settings";
 import { resolveStepProfile } from "../chains/registry";
 import type { ChainDef } from "../chains/registry";
 import { spawnSync } from "node:child_process";
@@ -185,6 +186,28 @@ export class GrayskullAgent {
   /** Apply (or clear with null) a step's profile on the shared client. */
   setInferenceProfile(profile: InferenceProfile | null): void {
     this.client.setInferenceProfile(profile);
+  }
+
+  /** Live model switch (/model): copy a named preset into the shared settings
+   *  and rebuild the client connection. modelFamily drives leak dialect + chain
+   *  presets live; sampling/model/contextWindow are read fresh per request. */
+  applyModelSwitch(preset: ModelPreset): void {
+    const s = this.settings;
+    s.modelFamily = preset.family;
+    s.baseURL = preset.baseURL;
+    s.model = preset.model;
+    if (preset.apiKeyEnv !== undefined) s.apiKeyEnv = preset.apiKeyEnv;
+    if (preset.contextWindow !== undefined) s.contextWindow = preset.contextWindow;
+    if (preset.temperature !== undefined) s.temperature = preset.temperature;
+    if (preset.topP !== undefined) s.topP = preset.topP;
+    if (preset.topK !== undefined) s.topK = preset.topK;
+    if (preset.minP !== undefined) s.minP = preset.minP;
+    if (preset.enableThinking !== undefined) s.enableThinking = preset.enableThinking;
+    this.client.reconfigure();
+  }
+
+  get modelName(): string {
+    return this.settings.model;
   }
 
   constructor(opts: {

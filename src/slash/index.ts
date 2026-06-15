@@ -204,6 +204,32 @@ export const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "model",
+    description: "switch the whole model stack live: /model [name]",
+    run: async (ctx, args) => {
+      const presets = ctx.settings.models;
+      const names = Object.keys(presets);
+      const want = args.trim();
+      if (!want) {
+        const lines = names.map((n) => {
+          const p = presets[n]!;
+          const active = p.baseURL === ctx.settings.baseURL && p.model === ctx.settings.model;
+          return `${active ? "●" : "○"} ${n} — ${p.family} · ${p.model} @ ${p.baseURL}`;
+        });
+        return note(ctx, `${lines.join("\n")}\n\ncurrent: ${ctx.settings.model} (${ctx.settings.modelFamily})\nswitch with /model <name>`);
+      }
+      const preset = presets[want];
+      if (!preset) {
+        return note(ctx, `no model "${want}". Known: ${names.join(", ")}`);
+      }
+      ctx.agent.applyModelSwitch(preset);
+      note(
+        ctx,
+        `⚡ switched to "${want}": ${preset.family} · ${preset.model} @ ${preset.baseURL} (ctx ${ctx.settings.contextWindow}, temp ${ctx.settings.temperature}). History kept; /clear to reset.`,
+      );
+    },
+  },
+  {
     name: "thinking",
     description: "toggle model thinking mode: /thinking [on|off]",
     run: async (ctx, args) => {

@@ -46,8 +46,9 @@ export function registerAgentTools(opts: {
   client: LlmClient;
   registry: ToolRegistry;
   concurrency: number;
-  /** tool-call leak dialect for the model family (sub-agents share it) */
-  leakDialect?: LeakDialect;
+  /** tool-call leak dialect for the model family (resolved live so /model
+   *  switches reach sub-agents too) */
+  leakDialect?: () => LeakDialect;
   /** live agent-mesh feed (web UI); no-op when absent */
   monitor?: (ev: AgentMonitorEvent) => void;
 }): void {
@@ -126,7 +127,7 @@ export function registerAgentTools(opts: {
           client,
           registry,
           schemas: registry.schemas(allowed),
-          leakDialect: opts.leakDialect,
+          leakDialect: opts.leakDialect?.(),
           messages,
           ctx: subCtx,
           onTextDelta: (text) => monitor({ kind: "delta", id: spawnId, agent: agentName, text }),

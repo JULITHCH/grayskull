@@ -54,12 +54,24 @@ export class LlmClient {
 
   constructor(settings: Settings) {
     this.settings = settings;
-    this.client = new OpenAI({
-      baseURL: settings.baseURL,
-      apiKey: process.env[settings.apiKeyEnv] ?? "none",
+    this.client = this.buildClient();
+  }
+
+  private buildClient(): OpenAI {
+    return new OpenAI({
+      baseURL: this.settings.baseURL,
+      apiKey: process.env[this.settings.apiKeyEnv] ?? "none",
       timeout: 600_000,
       maxRetries: 1,
     });
+  }
+
+  /** Rebuild the underlying connection after the endpoint (baseURL/apiKeyEnv)
+   *  changed in settings — used by /model. model id and sampling are read
+   *  fresh per request, so only the transport needs rebuilding. */
+  reconfigure(): void {
+    this.client = this.buildClient();
+    this.lastPromptTokens = 0;
   }
 
   /** Apply a chain-step inference profile (thinking + sampling, flipped

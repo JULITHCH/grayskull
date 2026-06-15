@@ -41,7 +41,7 @@ registerAgentTools({
   client,
   registry,
   concurrency: settings.agentConcurrency,
-  leakDialect: modelProfile(settings.modelFamily).leakDialect,
+  leakDialect: () => modelProfile(settings.modelFamily).leakDialect,
   monitor: (ev) => link.publish({ t: "agent", ev }),
 });
 registry.register(skillTool(cwd));

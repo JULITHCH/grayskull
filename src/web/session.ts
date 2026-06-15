@@ -71,7 +71,7 @@ export class WebSession {
       client: this.client,
       registry,
       concurrency: this.settings.agentConcurrency,
-      leakDialect: modelProfile(this.settings.modelFamily).leakDialect,
+      leakDialect: () => modelProfile(this.settings.modelFamily).leakDialect,
       monitor: (ev) => this.send({ t: "agent", ev }),
     });
     this.perms = new PermissionEngine(this.settings);

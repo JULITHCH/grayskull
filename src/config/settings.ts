@@ -27,6 +27,21 @@ const McpServerSchema = z.union([
   }),
 ]);
 
+/** A named model preset: the full stack to switch to with /model <name>. */
+const ModelPresetSchema = z.object({
+  family: z.enum(["qwen3.5", "glm4.5"]),
+  baseURL: z.string(),
+  model: z.string(),
+  apiKeyEnv: z.string().optional(),
+  contextWindow: z.number().optional(),
+  temperature: z.number().optional(),
+  topP: z.number().optional(),
+  topK: z.number().optional(),
+  minP: z.number().optional(),
+  enableThinking: z.boolean().optional(),
+});
+export type ModelPreset = z.infer<typeof ModelPresetSchema>;
+
 export const SettingsSchema = z.object({
   baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
@@ -45,6 +60,31 @@ export const SettingsSchema = z.object({
   repetitionPenalty: z.number().default(1.0),
   /** chat_template_kwargs.enable_thinking (same kwarg on Qwen3.5 and GLM-4.5) */
   enableThinking: z.boolean().default(false),
+  /** named endpoint presets for the /model command — switch the whole stack
+   *  (family, endpoint, model, default sampling) live. The active config is the
+   *  top-level fields above; /model copies a preset into them. */
+  models: z
+    .record(z.string(), ModelPresetSchema)
+    .default({
+      qwen: {
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8000/v1",
+        model: "happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound",
+        contextWindow: 196608,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+      },
+      glm: {
+        family: "glm4.5",
+        baseURL: "http://10.8.0.22:8001/v1",
+        model: "glm-4.5-air",
+        contextWindow: 131072,
+        temperature: 0.6,
+        topP: 0.95,
+        topK: 40,
+      },
+    }),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),
   defaultMode: z.enum(["normal", "accept-edits", "plan", "kamikazeee"]).default("normal"),
   editor: z.string().optional(),
