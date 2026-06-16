@@ -87,71 +87,117 @@ export async function runToolLoop(opts: {
 
     if (toolCalls.length === 0) break;
 
+    // Phase A — validate + preview + permission, SEQUENTIALLY (one modal at a
+    // time, in order). Produces an ordered task per call: either an immediate
+    // reply or an approved execution.
+    type ExecTask = {
+      call: (typeof toolCalls)[number];
+      tool: NonNullable<ReturnType<typeof registry.get>>;
+      args: Record<string, unknown>;
+      item: TranscriptItem & { type: "tool" };
+      parallel: boolean;
+    };
+    type Task = { call: (typeof toolCalls)[number]; reply: string } | ExecTask;
+    const tasks: Task[] = [];
     for (const call of toolCalls) {
       if (signal?.aborted) break;
-      const reply = (content: string) =>
-        messages.push({ role: "tool", tool_call_id: call.id, content });
-
       const tool = registry.get(call.function.name);
       if (!tool || !knownTools.has(call.function.name)) {
-        reply(`Unknown tool "${call.function.name}". Available tools: ${[...knownTools].join(", ")}.`);
+        tasks.push({ call, reply: `Unknown tool "${call.function.name}". Available tools: ${[...knownTools].join(", ")}.` });
         continue;
       }
-
       const validated = validateCall(tool, call.function.arguments);
       if (!validated.ok) {
         const count = (repairCounts.get(tool.name) ?? 0) + 1;
         repairCounts.set(tool.name, count);
-        if (count > MAX_REPAIR_ATTEMPTS) {
-          reply(`Repeated invalid calls to ${tool.name}. Stop calling it and tell the user what you were trying to do.`);
-        } else {
-          reply(validated.error);
-        }
+        tasks.push({
+          call,
+          reply: count > MAX_REPAIR_ATTEMPTS
+            ? `Repeated invalid calls to ${tool.name}. Stop calling it and tell the user what you were trying to do.`
+            : validated.error,
+        });
         continue;
       }
       repairCounts.delete(tool.name);
       const args = validated.args;
-
       const item: TranscriptItem & { type: "tool" } = {
         type: "tool",
         name: tool.name,
         detail: tool.describeCall(args),
         state: "running",
       };
-      // edits/writes carry their diff into the transcript (Claude Code style)
       if (tool.previewCall) {
         item.preview = await tool.previewCall(args, ctx.cwd).catch(() => undefined);
       }
-
       if (opts.decide) {
         const verdict = await opts.decide(tool.name, args);
         if (!verdict.allowed) {
           item.state = "denied";
           opts.onToolEvent?.(item);
-          reply(`Permission denied: ${verdict.reason ?? "user declined"}. Do not retry the same call; adjust your approach or ask the user.`);
+          tasks.push({ call, reply: `Permission denied: ${verdict.reason ?? "user declined"}. Do not retry the same call; adjust your approach or ask the user.` });
           continue;
         }
       }
+      // parallel-safe: sub-agent fan-out and read-only tools (but not ask_user,
+      // which shows a modal). Side-effecting tools (edit/write/bash/create_agent)
+      // stay sequential.
+      const parallel = tool.name === "spawn_agent" || (tool.kind === "read" && tool.name !== "ask_user");
+      tasks.push({ call, tool, args, item, parallel });
+    }
 
-      opts.onToolEvent?.({ ...item });
+    // Phase B — execute. Results keyed by call id, pushed in original order so
+    // every tool_call has a matching tool message (and in tool_calls order).
+    const results = new Map<string, string>();
+    const runExec = async (t: ExecTask): Promise<void> => {
+      opts.onToolEvent?.({ ...t.item });
       try {
-        let result = await tool.execute(args, ctx);
-        // compiler feedback loop: file changes trigger the project check,
-        // failures land in the same tool result (applies to sub-agents too)
-        if (tool.kind === "edit" && !result.startsWith("error:")) {
+        let result = await t.tool.execute(t.args, ctx);
+        if (t.tool.kind === "edit" && !result.startsWith("error:")) {
           const diag = runDiagnostics(ctx.cwd);
           if (diag) result += `\n\n${diag}`;
         }
-        item.state = "done";
-        item.result = result;
-        opts.onToolEvent?.({ ...item });
-        reply(result);
+        t.item.state = "done";
+        t.item.result = result;
+        opts.onToolEvent?.({ ...t.item });
+        results.set(t.call.id, result);
       } catch (err) {
-        item.state = "error";
-        item.result = (err as Error).message;
-        opts.onToolEvent?.({ ...item });
-        reply(`Tool error: ${(err as Error).message}`);
+        t.item.state = "error";
+        t.item.result = (err as Error).message;
+        opts.onToolEvent?.({ ...t.item });
+        results.set(t.call.id, `Tool error: ${(err as Error).message}`);
       }
+    };
+
+    let ti = 0;
+    while (ti < tasks.length) {
+      if (signal?.aborted) break;
+      const t = tasks[ti]!;
+      if (!("tool" in t)) {
+        results.set(t.call.id, t.reply);
+        ti++;
+        continue;
+      }
+      if (!t.parallel) {
+        await runExec(t);
+        ti++;
+        continue;
+      }
+      // coalesce the consecutive run of parallel-safe tasks and run them at once;
+      // spawn_agent self-limits via its semaphore (agentConcurrency)
+      const batch: ExecTask[] = [];
+      while (ti < tasks.length) {
+        const n = tasks[ti]!;
+        if ("tool" in n && n.parallel) {
+          batch.push(n);
+          ti++;
+        } else break;
+      }
+      await Promise.all(batch.map(runExec));
+    }
+
+    // never leave a tool_call dangling (a missing tool message 400s GLM on replay)
+    for (const call of toolCalls) {
+      messages.push({ role: "tool", tool_call_id: call.id, content: results.get(call.id) ?? "[interrupted]" });
     }
   }
   return lastText;
