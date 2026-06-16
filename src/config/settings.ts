@@ -76,13 +76,12 @@ export const SettingsSchema = z.object({
         topK: 20,
       },
       qwen36: {
-        // reuses the qwen3.5 model profile (leak dialect + chain presets); port 8002.
-        // NOTE: `model` is a best-guess served-model-name — verify against the
-        // server's --served-model-name (qwen3.6-server-notes.md on the Spark host).
+        // Qwen3.6-35B-A3B (FP8) on :8002; reuses the qwen3.5 model profile
+        // (leak dialect + chain presets). served-model-name + ctx verified live.
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8002/v1",
-        model: "qwen3.6",
-        contextWindow: 196608,
+        model: "qwen3.6-35b-a3b",
+        contextWindow: 262144,
         temperature: 0.7,
         topP: 0.8,
         topK: 20,
