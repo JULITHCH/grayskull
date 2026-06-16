@@ -256,6 +256,10 @@ On code tasks the model routes itself: `skill(pixijs) → pixijs-application →
 pixijs-scene-sprite → …` before writing. Long pack descriptions are capped at 220 chars
 in the system-prompt listing; the full body loads on invocation.
 
+Claude Code's **frontend-design** skill is also bundled (in `examples/skills/`, installed
+to `~/.config/grayskull/skills/`) — the model invokes it via the skill tool on any
+UI-building task, or run `/frontend-design` manually.
+
 ## Thinking chains — /thinkingchain (alias /tc)
 
 Named, reusable step pipelines the model is walked through in order — structure the
