@@ -66,10 +66,22 @@ export const SettingsSchema = z.object({
   models: z
     .record(z.string(), ModelPresetSchema)
     .default({
-      qwen: {
+      qwen35: {
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8000/v1",
         model: "happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound",
+        contextWindow: 196608,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+      },
+      qwen36: {
+        // reuses the qwen3.5 model profile (leak dialect + chain presets); port 8002.
+        // NOTE: `model` is a best-guess served-model-name — verify against the
+        // server's --served-model-name (qwen3.6-server-notes.md on the Spark host).
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8002/v1",
+        model: "qwen3.6",
         contextWindow: 196608,
         temperature: 0.7,
         topP: 0.8,

@@ -304,7 +304,7 @@ presets**, and the recorded vLLM **parser flags**. The thinking toggle
   XML), parsers `glm45` / `glm45`.
 
 **Switch the whole stack live with `/model`** — no restart. Named presets live under
-`models` in settings (seeded with `qwen` and `glm`); `/model` lists them, `/model glm`
+`models` in settings (seeded with `qwen35`, `qwen36` and `glm`); `/model` lists them, `/model glm`
 copies that preset's family, endpoint, model id, context window and sampling into the
 active config and rebuilds the client connection (leak dialect and chain presets follow
 the family, sub-agents included). History is kept across a switch; `/clear` to reset.
@@ -382,7 +382,7 @@ full conversation. `/clear` wipes the current conversation and screen.
 | `/forget <pattern>` | prune project memory |
 | `/compact` | compact the conversation now |
 | `/mode [name]` | show or set permission mode |
-| `/model [name]` | switch the whole model stack live (qwen ↔ glm), no restart |
+| `/model [name]` | switch the whole model stack live (qwen35 / qwen36 / glm), no restart |
 | `/thinking [on\|off]` | toggle the model's reasoning mode live (no restart) |
 | `/mcp [reconnect <name>]` | MCP status / reconnect |
 | `/agents [edit\|delete <name>]` | manage sub-agents |
