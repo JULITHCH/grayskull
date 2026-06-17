@@ -70,6 +70,8 @@ body.kamikazeee .item.assistant { color: #ffd5da; }
 .stream { color: #ccffdd; opacity: .9; }
 .reason { color: var(--g-dim); font-style: italic; font-size: 12px; }
 .reason::before { content: "∴ "; }
+.working { color: var(--magenta, #c8f); margin-top: 6px; }
+.working .hint { color: var(--g-dim); }
 .cursor::after { content: "▋"; animation: pulse 1s infinite; }
 
 #attachments { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }
@@ -334,8 +336,8 @@ function handle(m) {
     case "delta": stream(m.sid).text += m.text; renderStreamMaybe(m.sid); break;
     case "reasoning": stream(m.sid).reason = (stream(m.sid).reason + m.text).slice(-400); renderStreamMaybe(m.sid); break;
     case "stream_end": S.streams[m.sid] = { text: "", reason: "" }; renderStreamMaybe(m.sid); break;
-    case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; renderSessions(); renderStatus(); break;
-    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); renderOps(); break;
+    case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; renderSessions(); renderStatus(); if (m.sid === S.current) renderTranscript(); break;
+    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); renderOps(); if (m.sid === S.current) renderTranscript(); break;
     case "memory": S.memory[m.sid] = m; renderMemory(); break;
     case "agent": agentEvent(m.sid, m.ev); break;
     case "perm_req": S.pendingPerm = m; showPerm(); break;
@@ -397,15 +399,27 @@ function pushTranscript(sid, it, live) {
   if (live && sid === S.current) renderTranscript();
   if (it.type === "tool") nodePulse(sid, "core", it.detail + " [" + it.state + "]");
 }
+const SPIN = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+let spinFrame = 0;
 function renderTranscript() {
   const el = $("transcript");
   const sid = S.current;
   const st = stream(sid ?? "");
+  const stat = S.status[sid] ?? {};
   el.innerHTML = (S.transcripts[sid] ?? []).join("") +
     (st.reason && !st.text ? `<div class="reason">${esc(st.reason.split("\n").slice(-3).join("\n"))}</div>` : "") +
-    (st.text ? `<div class="stream cursor">${esc(st.text)}</div>` : "");
+    (st.text ? `<div class="stream cursor">${esc(st.text)}</div>` : "") +
+    // always show activity while the session is busy — even before any reasoning
+    // or token has streamed, so "thinking" never looks like a frozen screen
+    (stat.busy ? `<div class="working">${SPIN[spinFrame]} ${esc(stat.what || "working")}… <span class="hint">(Esc to interrupt)</span></div>` : "");
   el.scrollTop = el.scrollHeight;
 }
+// setInterval (unlike rAF) keeps ticking in a backgrounded tab, so the spinner
+// and any buffered stream keep updating while you're in another window
+setInterval(() => {
+  const stat = S.status[S.current] ?? {};
+  if (stat.busy) { spinFrame = (spinFrame + 1) % SPIN.length; renderTranscript(); }
+}, 110);
 let streamRaf = null;
 function renderStreamMaybe(sid) {
   if (sid !== S.current || streamRaf) return;
