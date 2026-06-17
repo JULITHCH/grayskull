@@ -57,8 +57,16 @@ in settings flips it via `chat_template_kwargs`, or toggle it live with `/thinki
 |---|---|
 | `shift+tab` | cycle permission modes |
 | `@` | fzf file picker — inserts the picked path into your prompt |
+| `←` / `→`, `ctrl+a` / `ctrl+e` | move the cursor within the prompt / jump to start / end |
 | `↑` / `↓` | browse previous prompts (shell-style, persisted per project) |
 | `esc` | interrupt the running turn / chain step |
+
+**Pasting:** a large or multi-line paste is collapsed to a `[#N pasted … lines]`
+placeholder in the input (the full text is restored when you send) — so big pastes
+don't flood the prompt. **Images:** put an image file path in your prompt (type it, paste
+it, or pick it with `@`) — `.png/.jpg/.jpeg/.gif/.webp/.bmp` files are read and sent as
+image parts to the (vision-capable) model; `@clipboard` grabs the clipboard image where a
+graphical session + `wl-clipboard`/`xclip` is available.
 | `1`-`9` | answer a model question by picking an option |
 | `y` / `a` / `n` | permission prompt: yes / always this session / no |
 | `ctrl+c` | quit |

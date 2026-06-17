@@ -19,6 +19,7 @@ import { loadGlobalMemory, loadLocalMemory } from "../memory/memory";
 import { memoryGraphData } from "../memory/scores";
 import { renderMarkdown } from "./markdown";
 import { pickFile } from "./external";
+import { extractImages } from "./images";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
 import { localDir } from "../config/paths";
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
@@ -61,10 +62,17 @@ const MODE_STYLE: Record<PermissionMode, { label: string; color: string }> = {
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STREAM_TAIL_LINES = 8;
 const STREAM_FLUSH_MS = 80;
+// a single keystroke chunk bigger than this (or with a newline) is a paste
+const PASTE_THRESHOLD = 120;
 
 type QueuedWork =
-  | { kind: "prompt"; text: string }
+  | { kind: "prompt"; text: string; images?: string[]; display?: string }
   | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string };
+
+/** Re-expand collapsed `[#N pasted …]` placeholders to their real content. */
+function expandPastes(text: string, pastes: string[]): string {
+  return text.replace(/\[#(\d+) pasted [^\]]*\]/g, (m, n: string) => pastes[Number(n) - 1] ?? m);
+}
 
 interface PendingPermission {
   reqId: string;
@@ -108,6 +116,13 @@ export function App(props: AppProps): React.ReactElement {
   const [streamText, setStreamText] = useState("");
   const [streamReason, setStreamReason] = useState("");
   const [input, setInput] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const pastesRef = useRef<string[]>([]);
+  /** set the input text and place the cursor (defaults to end). */
+  const setLine = (text: string, cur?: number) => {
+    setInput(text);
+    setCursor(cur ?? text.length);
+  };
   const [mode, setModeState] = useState<PermissionMode>(perms.mode);
   const [busy, setBusy] = useState(false);
   const [busyWhat, setBusyWhat] = useState("");
@@ -335,11 +350,11 @@ export function App(props: AppProps): React.ReactElement {
     return () => clearInterval(t);
   }, [busy]);
 
-  const submitToAgent = (text: string) => {
+  const submitToAgent = (text: string, images: string[] = [], display?: string) => {
     // sticky thinking chain: every plain prompt becomes a chain run
     const sticky = chainState.sticky;
     queueRef.current.push(
-      sticky ? { kind: "chain", def: sticky.def, mode: sticky.mode, task: text } : { kind: "prompt", text },
+      sticky ? { kind: "chain", def: sticky.def, mode: sticky.mode, task: text } : { kind: "prompt", text, images, display },
     );
     void drainQueue();
   };
@@ -356,8 +371,8 @@ export function App(props: AppProps): React.ReactElement {
       let next: QueuedWork | undefined;
       while ((next = queueRef.current.shift()) !== undefined) {
         if (next.kind === "prompt") {
-          pushItem({ type: "user", text: next.text });
-          await agent.runTurn(next.text);
+          pushItem({ type: "user", text: next.display ?? next.text });
+          await agent.runTurn(next.text, next.images ?? []);
         } else {
           pushItem({ type: "user", text: `⛓ [${next.def.name}] ${next.task}` });
           await runChain({ chain: next.def, task: next.task, mode: next.mode, agent, ui: bridge, memory });
@@ -370,21 +385,30 @@ export function App(props: AppProps): React.ReactElement {
   };
 
   const handleSubmit = async () => {
-    const text = input.trim();
-    if (!text) return;
-    setInput("");
+    const display = input.trim();
+    if (!display) return;
+    setLine("", 0);
     histIdxRef.current = null;
     draftRef.current = "";
-    if (historyRef.current[historyRef.current.length - 1] !== text) {
-      historyRef.current.push(text);
+    if (historyRef.current[historyRef.current.length - 1] !== display) {
+      historyRef.current.push(display); // collapsed form (placeholders) in nav history
       if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
-      appendPromptHistory(cwd, text);
+      appendPromptHistory(cwd, display);
     }
-    await submitText(text);
+    if (display.startsWith("/")) {
+      await submitText(display); // slash: no paste-expand / image-extract
+      return;
+    }
+    // expand collapsed pastes, pull out image attachments, send the rest
+    const expanded = expandPastes(display, pastesRef.current);
+    const { text, images } = extractImages(expanded, cwd);
+    pastesRef.current = [];
+    const shown = images.length ? `${display}  [📎 ${images.length} image${images.length > 1 ? "s" : ""}]` : display;
+    await submitText(text, images, shown);
   };
 
   /** Shared by the keyboard path and prompts arriving from the web hub. */
-  const submitText = async (text: string) => {
+  const submitText = async (text: string, images: string[] = [], display?: string) => {
     if (text.startsWith("/")) {
       const ctx: CommandContext = {
         cwd,
@@ -422,7 +446,7 @@ export function App(props: AppProps): React.ReactElement {
       publishStatus();
       return;
     }
-    submitToAgent(text);
+    submitToAgent(text, images, display);
   };
 
   useInput((char, key) => {
@@ -446,6 +470,24 @@ export function App(props: AppProps): React.ReactElement {
       return;
     }
 
+    // left/right move the cursor; ctrl+a / ctrl+e jump to start / end
+    if (key.leftArrow) {
+      setCursor(Math.max(0, cursor - 1));
+      return;
+    }
+    if (key.rightArrow) {
+      setCursor(Math.min(input.length, cursor + 1));
+      return;
+    }
+    if (key.ctrl && char === "a") {
+      setCursor(0);
+      return;
+    }
+    if (key.ctrl && char === "e") {
+      setCursor(input.length);
+      return;
+    }
+
     // shell-style history: up = older, down = newer, past newest = your draft
     if (key.upArrow) {
       const hist = historyRef.current;
@@ -456,17 +498,17 @@ export function App(props: AppProps): React.ReactElement {
       } else if (histIdxRef.current > 0) {
         histIdxRef.current--;
       }
-      setInput(hist[histIdxRef.current] ?? "");
+      setLine(hist[histIdxRef.current] ?? "");
       return;
     }
     if (key.downArrow) {
       if (histIdxRef.current === null) return;
       if (histIdxRef.current < historyRef.current.length - 1) {
         histIdxRef.current++;
-        setInput(historyRef.current[histIdxRef.current] ?? "");
+        setLine(historyRef.current[histIdxRef.current] ?? "");
       } else {
         histIdxRef.current = null;
-        setInput(draftRef.current);
+        setLine(draftRef.current);
       }
       return;
     }
@@ -485,7 +527,7 @@ export function App(props: AppProps): React.ReactElement {
         const answer = input.trim();
         if (!answer) return;
         resolveAsk(answer);
-        setInput("");
+        setLine("", 0);
         return;
       }
       void handleSubmit();
@@ -493,18 +535,31 @@ export function App(props: AppProps): React.ReactElement {
     }
 
     if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
+      if (cursor > 0) setLine(input.slice(0, cursor - 1) + input.slice(cursor), cursor - 1);
       return;
     }
 
     if (char === "@") {
       const picked = pickFile(cwd);
-      setInput((v) => v + (picked ? `@${picked} ` : "@"));
+      const ins = picked ? `@${picked} ` : "@";
+      setLine(input.slice(0, cursor) + ins + input.slice(cursor), cursor + ins.length);
       return;
     }
 
     if (char && !key.ctrl && !key.meta) {
-      setInput((v) => v + char);
+      // strip bracketed-paste markers some terminals send around a paste
+      const chunk = char.replace(/\[20[01]~/g, "");
+      if (!chunk) return;
+      // a large or multi-line chunk is a paste — collapse it to a placeholder
+      // and stash the real content (expanded on submit), like Claude Code
+      if (chunk.length > PASTE_THRESHOLD || chunk.includes("\n")) {
+        pastesRef.current.push(chunk);
+        const lines = chunk.split("\n").length;
+        const ph = `[#${pastesRef.current.length} pasted ${lines > 1 ? `${lines} lines` : `${chunk.length} chars`}]`;
+        setLine(input.slice(0, cursor) + ph + input.slice(cursor), cursor + ph.length);
+      } else {
+        setLine(input.slice(0, cursor) + chunk + input.slice(cursor), cursor + chunk.length);
+      }
     }
   });
 
@@ -581,8 +636,9 @@ export function App(props: AppProps): React.ReactElement {
 
       <Box borderStyle="round" borderColor={MODE_STYLE[mode].color} paddingX={1} marginTop={1}>
         <Text color={MODE_STYLE[mode].color}>{"> "}</Text>
-        <Text>{input}</Text>
-        <Text color={MODE_STYLE[mode].color}>▋</Text>
+        <Text>{input.slice(0, cursor)}</Text>
+        <Text inverse>{input[cursor] ?? " "}</Text>
+        <Text>{input.slice(cursor + 1)}</Text>
       </Box>
 
       {slashHints.length > 0 && (

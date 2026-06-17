@@ -336,7 +336,7 @@ export class GrayskullAgent {
     this.history = await compact(this.client, this.history);
   }
 
-  async runTurn(userText: string): Promise<string> {
+  async runTurn(userText: string, images: string[] = []): Promise<string> {
     this.abort = new AbortController();
     const signal = this.abort.signal;
     this.ui.setBusy(true, "thinking");
@@ -364,8 +364,16 @@ export class GrayskullAgent {
       }
     }
 
-    this.history.push({ role: "user", content: userText });
-    const turnLog: string[] = [`user: ${userText.slice(0, 2000)}`];
+    // multimodal: attach pasted/picked images as image_url parts (vision models)
+    const userContent =
+      images.length > 0
+        ? [
+            { type: "text" as const, text: userText },
+            ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+          ]
+        : userText;
+    this.history.push({ role: "user", content: userContent });
+    const turnLog: string[] = [`user: ${userText.slice(0, 2000)}${images.length ? ` [+${images.length} image]` : ""}`];
     const messages: ChatMessage[] = [this.buildSystemMessage(this.autoSkills(userText)), ...this.history];
     let finalText = "";
 
