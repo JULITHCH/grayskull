@@ -44,13 +44,14 @@ const ModelPresetSchema = z.object({
 export type ModelPreset = z.infer<typeof ModelPresetSchema>;
 
 export const SettingsSchema = z.object({
-  baseURL: z.string().default("http://10.8.0.22:8000/v1"),
+  // defaults to Qwen3.6-35B-A3B on :8002 (reuses the qwen3.5 model profile);
+  // /model qwen35 / glm switch the whole stack live.
+  baseURL: z.string().default("http://10.8.0.22:8002/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
-  model: z.string().default("happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound"),
-  /** model family — selects leak-recovery dialect + chain-step sampling presets.
-   *  Switch to "glm4.5" (with baseURL :8001, model glm-4.5-air) for GLM-4.5-Air. */
+  model: z.string().default("qwen3.6-35b-a3b"),
+  /** model family — selects leak-recovery dialect + chain-step sampling presets. */
   modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
-  contextWindow: z.number().default(196608),
+  contextWindow: z.number().default(262144),
   maxTokens: z.number().default(32768),
   // Qwen non-thinking coding preset
   temperature: z.number().default(0.7),

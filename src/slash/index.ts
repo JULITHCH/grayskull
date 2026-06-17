@@ -4,7 +4,7 @@ import type { GrayskullAgent } from "../agent/loop";
 import type { MemoryManager } from "../memory/memory";
 import { loadGlobalMemory, loadLocalMemory, saveLocalMemory } from "../memory/memory";
 import { ScoreStore, bulletHash, archivePath } from "../memory/scores";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { McpManager } from "../mcp/manager";
 import type { PermissionEngine } from "../perms/engine";
 import type { SessionStore } from "../session/store";
@@ -30,7 +30,7 @@ import {
   type ChainContextMode,
 } from "../chains/registry";
 import { chainState } from "../chains/runner";
-import { openInEditor, pickChoice } from "../ui/external";
+import { openInEditor } from "../ui/external";
 import { existsSync, writeFileSync } from "node:fs";
 import { MODE_ORDER } from "../types";
 
@@ -311,14 +311,33 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "resume",
-    description: "load a past session (picked with fzf)",
-    run: async (ctx) => {
-      const past = ctx.store.listPast();
+    description: "list past sessions; /resume N loads one",
+    run: async (ctx, args) => {
+      const past = ctx.store.listPast(); // newest first
       if (past.length === 0) return note(ctx, "no past sessions for this project");
-      const picked = pickChoice(past, "session");
-      if (!picked) return;
-      ctx.agent.history = Store.load(picked);
-      note(ctx, `resumed ${picked} (${ctx.agent.history.length} messages)`);
+      const n = Number.parseInt(args.trim(), 10);
+      if (args.trim() && Number.isInteger(n) && past[n - 1]) {
+        const msgs = Store.load(past[n - 1]!);
+        ctx.agent.history = msgs;
+        return note(ctx, `resumed session ${n} (${msgs.length} messages)`);
+      }
+      if (args.trim()) return note(ctx, `no session ${args.trim()} — /resume to list`);
+      // numbered list works in the browser, over the hub, and in the terminal
+      // (no fzf / tty needed)
+      const list = past
+        .slice(0, 15)
+        .map((p, i) => {
+          const name = p.split("/").pop()!.replace(/\.jsonl$/, "");
+          let kb = 0;
+          try {
+            kb = Math.max(1, Math.round(statSync(p).size / 1024));
+          } catch {
+            // unreadable — show without size
+          }
+          return `  ${i + 1}. ${name}  (${kb} KB)`;
+        })
+        .join("\n");
+      note(ctx, `past sessions — type /resume N to load:\n${list}`);
     },
   },
   {

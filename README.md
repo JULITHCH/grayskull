@@ -376,8 +376,9 @@ No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
 ## Sessions
 
 Every session is logged as JSONL under `~/.config/grayskull/sessions/<project>/`.
-`/resume` opens an fzf picker over past sessions of the current project and restores the
-full conversation. `/clear` wipes the current conversation and screen.
+`/resume` lists the project's past sessions numbered; `/resume N` restores that
+conversation (works in the terminal, the web UI, and over the hub — no fzf needed).
+`/clear` wipes the current conversation and screen.
 
 ---
 
@@ -401,7 +402,7 @@ full conversation. `/clear` wipes the current conversation and screen.
 | `/skills` | list discovered skills |
 | `/<skill-name> [args]` | run a skill |
 | `/thinkingchain`, `/tc` | thinking chains (see above) |
-| `/resume` | restore a past session (fzf) |
+| `/resume [N]` | list past sessions; `/resume N` restores one |
 | `/clear` | clear conversation + screen |
 | `/exit` | quit |
 
