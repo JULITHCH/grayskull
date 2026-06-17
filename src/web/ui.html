@@ -101,7 +101,8 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 #right { grid-row: 2; display: grid; grid-template-rows: 1fr 1fr 170px; gap: 8px; min-height: 0; }
 #mesh { position: relative; }
 #meshSvg { width: 100%; height: 100%; }
-#memSvg { width: 100%; height: 100%; }
+#memCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#memCanvas:active { cursor: grabbing; }
 .mnode circle { fill: rgba(0,20,6,.85); stroke: var(--g-dim); cursor: pointer; transition: r .4s, stroke .4s; }
 .mnode.s0 circle { stroke: #2a6; } .mnode.s1 circle { stroke: var(--cyan); } .mnode.s2 circle { stroke: var(--amber); }
 .mnode.s3 circle { stroke: #c8f; } .mnode.s4 circle { stroke: var(--red); }
@@ -231,7 +232,7 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
     </div>
     <div class="panel" id="memPanel" style="position:relative">
       <h2>MEMORY ACTIVATION <span class="toggle" id="memToggle">TEXT</span></h2>
-      <svg id="memSvg"></svg>
+      <canvas id="memCanvas"></canvas>
       <div id="memLegend"></div>
       <div id="memBody" style="display:none">(no session)</div>
     </div>
@@ -604,7 +605,7 @@ let memView = "graph";
 $("memToggle").onclick = () => {
   memView = memView === "graph" ? "text" : "graph";
   $("memToggle").textContent = memView === "graph" ? "TEXT" : "GRAPH";
-  $("memSvg").style.display = memView === "graph" ? "" : "none";
+  $("memCanvas").style.display = memView === "graph" ? "" : "none";
   $("memLegend").style.display = memView === "graph" ? "" : "none";
   $("memBody").style.display = memView === "graph" ? "none" : "";
   renderMemory();
@@ -619,51 +620,117 @@ function renderMemory() {
     l.startsWith("##") ? `<div class="mem-h">${esc(l.replace(/^#+\s*/, "").toUpperCase())}</div>`
     : l.trim() ? `<div class="mem-b">${esc(l)}</div>` : "").join("");
   $("memBody").innerHTML = html || "(memory empty)";
-  renderMemoryGraph(m.graph);
+  mem3Update(m.graph);
 }
 
-function renderMemoryGraph(graph) {
-  const svg = $("memSvg");
-  if (!graph || !graph.nodes?.length) {
-    svg.innerHTML = `<text x="50%" y="50%" fill="#0a5" font-size="11" text-anchor="middle">no project memory yet — every turn grows the brain</text>`;
-    $("memLegend").textContent = "";
-    return;
-  }
-  const W = svg.clientWidth || 400, H = svg.clientHeight || 260;
+/* ── 3D memory activation graph (hand-rolled canvas, zero deps) ──
+   section clusters sit on a sphere; each memory orbits its cluster (strong
+   ones nearer the centre); size = activation, edges = lexical similarity.
+   perspective projection + depth fog, auto-rotates, drag to spin, click a
+   node for its detail. */
+const SECT_COLORS = ["#33ff88", "#00ddff", "#ffaa00", "#cc88ff", "#ff4466"];
+const mem3 = { ctx: null, canvas: null, nodes: [], links: [], sections: [], sig: "",
+  yaw: 0, pitch: -0.3, vyaw: 0.0035, drag: false, moved: 0, lx: 0, ly: 0, proj: [] };
+
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a.toFixed(3)})`; }
+// i-th of n points evenly on a unit sphere (golden-spiral / Fibonacci)
+function fibSphere(i, n) {
+  const y = n <= 1 ? 0 : 1 - (i / (n - 1)) * 2;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  const th = i * 2.399963229; // golden angle
+  return [r * Math.cos(th), y, r * Math.sin(th)];
+}
+
+function mem3Layout(graph) {
   const sections = [...new Set(graph.nodes.map((n) => n.section))];
-  // section cluster anchors arranged in a ring
-  const anchors = {};
-  sections.forEach((s, i) => {
-    const a = (i / sections.length) * Math.PI * 2 - Math.PI / 2;
-    anchors[s] = { x: W / 2 + (W / 3.1) * Math.cos(a), y: H / 2 + (H / 3.2) * Math.sin(a) };
-  });
-  // nodes orbit their section anchor, sorted so strong memories sit closest
-  const pos = {};
+  const cent = {};
+  sections.forEach((s, i) => { const p = fibSphere(i, sections.length); cent[s] = [p[0] * 0.85, p[1] * 0.68, p[2] * 0.85]; });
+  const nodes = [];
   for (const s of sections) {
-    const members = graph.nodes.filter((n) => n.section === s).sort((a, b) => b.score - a.score);
-    members.forEach((n, i) => {
-      const a = (i / Math.max(members.length, 1)) * Math.PI * 2;
-      const r = 12 + i * 7;
-      pos[n.id] = { x: anchors[s].x + r * Math.cos(a), y: anchors[s].y + r * Math.sin(a) };
+    const mem = graph.nodes.filter((n) => n.section === s).sort((a, b) => b.score - a.score);
+    mem.forEach((n, i) => {
+      const o = fibSphere(i, Math.max(mem.length, 1));
+      const cr = 0.10 + 0.18 * (mem.length > 1 ? i / (mem.length - 1) : 0); // strong → near centroid
+      nodes.push({ id: n.id, text: n.text, section: n.section, score: n.score, uses: n.uses,
+        si: sections.indexOf(n.section) % SECT_COLORS.length,
+        x: cent[s][0] + o[0] * cr, y: cent[s][1] + o[1] * cr, z: cent[s][2] + o[2] * cr });
     });
   }
-  let html = "";
-  for (const l of graph.links) {
-    const a = pos[l.a], b = pos[l.b];
-    if (!a || !b) continue;
-    html += `<line class="mlink" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-opacity="${Math.min(l.sim, .8)}" stroke-width="${l.sim > .6 ? 1.5 : 1}"/>`;
+  const has = new Set(nodes.map((n) => n.id));
+  mem3.nodes = nodes;
+  mem3.links = (graph.links || []).filter((l) => has.has(l.a) && has.has(l.b));
+  mem3.sections = sections;
+}
+
+function mem3Update(graph) {
+  if (!mem3.ctx) mem3Init();
+  if (!graph || !graph.nodes?.length) { mem3.nodes = []; mem3.sig = ""; $("memLegend").textContent = ""; return; }
+  const sig = graph.nodes.length + ":" + graph.nodes.map((n) => n.id).join(",");
+  if (sig !== mem3.sig) { mem3.sig = sig; mem3Layout(graph); }
+  $("memLegend").innerHTML = mem3.sections.map((s, i) => `<span style="color:${SECT_COLORS[i % 5]}">●</span>${esc(s)}`).join("  ") + "  · size=activation · drag to spin";
+}
+
+function mem3Init() {
+  const c = $("memCanvas"); mem3.canvas = c; mem3.ctx = c.getContext("2d");
+  c.addEventListener("pointerdown", (e) => { mem3.drag = true; mem3.moved = 0; mem3.lx = e.clientX; mem3.ly = e.clientY; try { c.setPointerCapture(e.pointerId); } catch {} });
+  c.addEventListener("pointermove", (e) => {
+    if (!mem3.drag) return;
+    const dx = e.clientX - mem3.lx, dy = e.clientY - mem3.ly;
+    mem3.lx = e.clientX; mem3.ly = e.clientY; mem3.moved += Math.abs(dx) + Math.abs(dy);
+    mem3.yaw += dx * 0.01; mem3.pitch = Math.max(-1.3, Math.min(1.3, mem3.pitch + dy * 0.01));
+  });
+  c.addEventListener("pointerup", (e) => { mem3.drag = false; if (mem3.moved < 5) mem3Click(e); });
+  requestAnimationFrame(mem3Frame);
+}
+
+function mem3Click(e) {
+  const r = mem3.canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bestD = 1e9;
+  for (const p of mem3.proj) { const d = Math.hypot(p.sx - mx, p.sy - my); if (d < p.r + 7 && d < bestD) { bestD = d; best = p.id; } }
+  if (best) openMemNode(best);
+}
+
+function mem3Frame() {
+  requestAnimationFrame(mem3Frame);
+  const c = mem3.canvas;
+  if (memView !== "graph" || !c || c.offsetParent === null || !mem3.nodes.length) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = c.clientWidth, H = c.clientHeight;
+  if (!W || !H) return;
+  if (c.width !== (W * dpr | 0) || c.height !== (H * dpr | 0)) { c.width = W * dpr | 0; c.height = H * dpr | 0; }
+  const ctx = mem3.ctx; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  if (!mem3.drag) mem3.yaw += mem3.vyaw;
+  const cyw = Math.cos(mem3.yaw), syw = Math.sin(mem3.yaw), cp = Math.cos(mem3.pitch), sp = Math.sin(mem3.pitch);
+  const D = 3.0, focal = Math.min(W, H) * 0.95, cx = W / 2, ccy = H / 2;
+  const kami = document.body.classList.contains("kamikazeee");
+  const proj = [];
+  for (const n of mem3.nodes) {
+    const x1 = n.x * cyw - n.z * syw, z1 = n.x * syw + n.z * cyw;      // yaw about Y
+    const y2 = n.y * cp - z1 * sp, z2 = n.y * sp + z1 * cp;            // pitch about X
+    const s = focal / (D - z2);
+    proj.push({ id: n.id, n, z: z2, sx: cx + x1 * s, sy: ccy + y2 * s,
+      r: (2.5 + Math.min(n.score, 3) * 3) * (D / (D - z2)) * (Math.min(W, H) / 320) });
   }
-  for (const n of graph.nodes) {
-    const p = pos[n.id];
-    const r = 3 + Math.min(n.score, 3) * 3.5;          // activation = size
-    const glow = n.score > 1.5 ? `filter="drop-shadow(0 0 ${n.score * 2}px var(--g))"` : "";
-    const si = sections.indexOf(n.section) % 5;
-    html += `<g class="mnode s${si}" onclick='openMemNode("${n.id}")'>
-      <circle cx="${p.x}" cy="${p.y}" r="${r}" ${glow} fill-opacity="${0.4 + Math.min(n.score, 3) / 5}"/>
-    </g>`;
+  proj.sort((a, b) => a.z - b.z); // far first (painter's)
+  mem3.proj = proj;
+  const pmap = {}; for (const p of proj) pmap[p.id] = p;
+  ctx.lineWidth = 1;
+  for (const l of mem3.links) {
+    const a = pmap[l.a], b = pmap[l.b]; if (!a || !b) continue;
+    const af = Math.max(0, Math.min(1, ((a.z + b.z) / 2 + 1.2) / 2.4));
+    ctx.strokeStyle = `rgba(${kami ? "255,90,110" : "0,255,110"},${(Math.min(l.sim, 0.7) * 0.5 * af).toFixed(3)})`;
+    ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke();
   }
-  svg.innerHTML = html;
-  $("memLegend").textContent = sections.map((s, i) => `●${i}=${s}`).join("  ") + "  · size = activation";
+  for (const p of proj) {
+    const depth = Math.max(0.25, Math.min(1, (p.z + 1.2) / 2.4));
+    const col = kami ? "#ff5a6e" : SECT_COLORS[p.n.si];
+    const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, p.r * 2.6);
+    g.addColorStop(0, hexA(col, 0.55 * depth)); g.addColorStop(0.4, hexA(col, 0.22 * depth)); g.addColorStop(1, hexA(col, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.sx, p.sy, p.r * 2.6, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = hexA(col, 0.85 * depth); ctx.beginPath(); ctx.arc(p.sx, p.sy, p.r, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = hexA(col, depth); ctx.lineWidth = 1; ctx.stroke();
+  }
 }
 function openMemNode(id) {
   const m = S.memory[S.current];
