@@ -155,6 +155,7 @@ export function App(props: AppProps): React.ReactElement {
   const histIdxRef = useRef<number | null>(null);
   const draftRef = useRef("");
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busyRef = useRef(false);
 
   const pushItem = (item: TranscriptItem) => {
     link?.publish({ t: "item", item });
@@ -189,14 +190,16 @@ export function App(props: AppProps): React.ReactElement {
     link?.publish({
       t: "status",
       mode: perms.mode,
-      busy: runningRef.current,
+      // real turn-busy, not the queue-drain flag (runningRef is still true when
+      // a turn ends inside the drain loop, which would stick the web UI on "working")
+      busy: busyRef.current,
       ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
       thinking: settings.enableThinking,
       legendary: agent.legendary,
       todo: todoState.items,
-      chain: runningRef.current ? chainState.running : null,
+      chain: busyRef.current ? chainState.running : null,
       sticky: chainState.sticky
         ? { name: chainState.sticky.def.name, mode: chainState.sticky.mode }
         : null,
@@ -283,6 +286,7 @@ export function App(props: AppProps): React.ReactElement {
         link?.publish({ t: "ask_req", reqId, question, options: options ?? null });
       });
     bridge.setBusy = (b, what) => {
+      busyRef.current = b;
       setBusy(b);
       setBusyWhat(what ?? "");
       link?.publish({ t: "busy", busy: b, what: what ?? "" });
