@@ -21,6 +21,10 @@ rendered dimmed, never scanned for tool calls.
   memory extraction). UI talks to it via the mutable `UiBridge` object filled in by App.
 - `agent/repair.ts` — weak-model accommodations: zod-validated tool args with retry
   messages, recovery of tool calls emitted as plain text/`<tool_call>` blocks.
+- `agent/compact.ts` — context-full handling at `compactThreshold`. `compactStrategy`:
+  `memory-swap` (default) writes a task-continuation handoff brief via `memorySwap`,
+  fully clears history, reseeds with the brief (model resumes from brief + injected
+  memory); `summarize` is classic `compact` (summary + keep-recent). Both in `runTurn`.
 - `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
   (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
   in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`

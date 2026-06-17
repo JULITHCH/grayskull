@@ -7,7 +7,7 @@ import type { PermissionEngine } from "../perms/engine";
 import type { MemoryManager } from "../memory/memory";
 import { detectGlobalTrigger } from "../memory/memory";
 import { validateCall, recoverTextToolCall, sanitizeToolCallArgs } from "./repair";
-import { needsCompaction, compact } from "./compact";
+import { needsCompaction, compact, memorySwap } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
@@ -355,12 +355,28 @@ export class GrayskullAgent {
     if (
       needsCompaction(this.history, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens)
     ) {
-      this.ui.setBusy(true, "compacting context");
-      try {
-        this.history = await compact(this.client, this.history);
-        this.ui.pushItem({ type: "note", text: "context compacted" });
-      } catch {
-        this.ui.pushItem({ type: "note", text: "compaction failed — continuing with full history" });
+      if (this.settings.compactStrategy === "memory-swap") {
+        this.ui.setBusy(true, "context full — saving task state, clearing window");
+        try {
+          this.history = await memorySwap(this.client, this.history);
+          this.ui.pushItem({ type: "note", text: "🧠 context full → task state captured, window cleared, resuming from memory" });
+        } catch {
+          // brief failed — fall back to classic compaction rather than risk overflow
+          try {
+            this.history = await compact(this.client, this.history);
+            this.ui.pushItem({ type: "note", text: "context compacted (memory-swap unavailable)" });
+          } catch {
+            this.ui.pushItem({ type: "note", text: "context near full — swap/compaction failed, continuing" });
+          }
+        }
+      } else {
+        this.ui.setBusy(true, "compacting context");
+        try {
+          this.history = await compact(this.client, this.history);
+          this.ui.pushItem({ type: "note", text: "context compacted" });
+        } catch {
+          this.ui.pushItem({ type: "note", text: "compaction failed — continuing with full history" });
+        }
       }
     }
 

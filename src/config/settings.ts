@@ -99,6 +99,11 @@ export const SettingsSchema = z.object({
       },
     }),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),
+  /** what to do when the context fills:
+   *  "memory-swap" — write a task-continuation brief, clear the window, resume
+   *  from brief + project memory (reliable for mid-size models);
+   *  "summarize" — classic compaction (summary + keep recent verbatim). */
+  compactStrategy: z.enum(["memory-swap", "summarize"]).default("memory-swap"),
   defaultMode: z.enum(["normal", "accept-edits", "plan", "kamikazeee"]).default("normal"),
   editor: z.string().optional(),
   agentConcurrency: z.number().int().min(1).max(8).default(2),

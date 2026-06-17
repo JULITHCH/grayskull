@@ -393,9 +393,17 @@ No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
 ## Context management
 
 - Live `ctx %` in the statusline (real prompt-token usage from vLLM).
-- Auto-compaction at 70% of the context window (256k on the qwen3.6 default; configurable `compactThreshold`): older
-  turns are summarized by the model into a briefing, recent turns stay verbatim,
-  memory files are untouched. Manual: `/compact`.
+- At 70% of the context window (configurable `compactThreshold`) the context is freed.
+  Two strategies (`compactStrategy`):
+  - **`memory-swap`** (default) — the model writes a dense task-continuation brief
+    (goal / done / key files & commands / exact next steps / how to verify), the window
+    is **fully cleared**, and it resumes from that brief plus its always-injected project
+    memory. A mid-size model follows a clean brief + trusted memory far more reliably than
+    a half-summarized history — so it carries a long task across a context reset instead
+    of losing the thread.
+  - **`summarize`** — classic compaction (model summary + keep recent turns verbatim).
+  Project/global memory is injected every turn regardless, so durable facts always survive.
+  Manual: `/compact`.
 
 ## Sessions
 
