@@ -1,6 +1,6 @@
 import type { ChatMessage, ToolContext, TranscriptItem } from "../types";
 import type { Settings } from "../config/settings";
-import { loadSystemPrompt } from "../config/settings";
+import { loadSystemPrompt, loadLegendaryMode } from "../config/settings";
 import type { LlmClient, ToolSchema } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import type { PermissionEngine } from "../perms/engine";
@@ -220,6 +220,10 @@ export class GrayskullAgent {
   /** Set at startup; lists SKILL.md skills for the system prompt. */
   skillListing: () => string = () => "";
 
+  /** /legendarymode — layers the legendary persona on top of the operational
+   *  prompt (session toggle, like thinking). */
+  legendary = false;
+
   /** Tool-call leak dialect for this model family. */
   get leakDialect(): LeakDialect {
     return modelProfile(this.settings.modelFamily).leakDialect;
@@ -314,6 +318,7 @@ export class GrayskullAgent {
       role: "system",
       content: [
         base,
+        this.legendary ? loadLegendaryMode() : "",
         `# Environment\n${env}`,
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",

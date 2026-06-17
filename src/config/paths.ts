@@ -10,6 +10,7 @@ export const GLOBAL_DIR = join(
 export const GLOBAL_SETTINGS = join(GLOBAL_DIR, "settings.json");
 export const GLOBAL_SYSTEM_PROMPT = join(GLOBAL_DIR, "system-prompt.md");
 export const GLOBAL_MEMORY = join(GLOBAL_DIR, "GRAYSKULL.md");
+export const GLOBAL_LEGENDARY = join(GLOBAL_DIR, "legendarymode.md");
 export const GLOBAL_AGENTS_DIR = join(GLOBAL_DIR, "agents");
 export const GLOBAL_CHAINS_DIR = join(GLOBAL_DIR, "chains");
 export const SESSIONS_DIR = join(GLOBAL_DIR, "sessions");

@@ -154,6 +154,7 @@ export class WebSession {
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: this.settings.model,
       thinking: this.settings.enableThinking,
+      legendary: this.agent.legendary,
       todo: this.todoState.items,
       // chainState is process-global; only claim it while this session works
       chain: this.busy ? chainState.running : null,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { render } from "ink";
 import { ensureDirs } from "./config/paths";
-import { ensureGlobalSystemPrompt, loadSettings } from "./config/settings";
+import { ensureGlobalSystemPrompt, ensureLegendaryMode, loadSettings } from "./config/settings";
 import { LlmClient } from "./llm/client";
 import { ToolRegistry, builtinTools } from "./tools";
 import { PermissionEngine } from "./perms/engine";
@@ -22,6 +22,7 @@ const cwd = process.cwd();
 ensureDirs(cwd);
 ensureGlobalSystemPrompt();
 ensureStarterChains();
+ensureLegendaryMode();
 
 let settings;
 try {

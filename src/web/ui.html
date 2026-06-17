@@ -180,6 +180,7 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
     <div class="chip" id="modelChip">model: —</div>
     <div class="chip" id="mcpChip">mcp: —</div>
     <div class="chip" id="thinkChip" style="display:none">∴ thinking</div>
+    <div class="chip" id="legendChip" style="display:none;color:var(--amber);border-color:var(--amber)">★ legendary</div>
     <div class="chip" id="kamiChip" style="display:none" >⚠ KAMIKAZEEE</div>
     <div style="flex:1"></div>
     <div class="chip" id="connChip">connecting…</div>
@@ -422,6 +423,7 @@ function renderStatus() {
   $("modelChip").textContent = "model: " + (st.model ? st.model.split("/").pop() : "—");
   $("mcpChip").textContent = "mcp: " + (st.mcp ? st.mcp.filter((m) => m.state === "connected").length + "/" + st.mcp.length : "—");
   $("thinkChip").style.display = st.thinking ? "" : "none";
+  $("legendChip").style.display = st.legendary ? "" : "none";
   $("ctxFill").style.width = (st.ctxPct ?? 0) + "%";
   $("ctxFill").style.background = (st.ctxPct ?? 0) > 70 ? "var(--amber)" : "var(--g-dim)";
   $("ctxTxt").textContent = "ctx " + (st.ctxPct ?? 0) + "%";

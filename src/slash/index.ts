@@ -230,6 +230,23 @@ export const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "legendarymode",
+    description: "toggle legendary persona (high-agency, no grovelling): /legendarymode [on|off]",
+    run: async (ctx, args) => {
+      const arg = args.trim().toLowerCase();
+      if (arg === "on") ctx.agent.legendary = true;
+      else if (arg === "off") ctx.agent.legendary = false;
+      else if (arg === "" || arg === "toggle") ctx.agent.legendary = !ctx.agent.legendary;
+      else if (arg !== "status") return note(ctx, "usage: /legendarymode [on|off|status]");
+      note(
+        ctx,
+        ctx.agent.legendary
+          ? "★ LEGENDARY MODE engaged — persona layered on top of the operational prompt. Edit it at ~/.config/grayskull/legendarymode.md"
+          : "legendary mode off",
+      );
+    },
+  },
+  {
     name: "thinking",
     description: "toggle model thinking mode: /thinking [on|off]",
     run: async (ctx, args) => {

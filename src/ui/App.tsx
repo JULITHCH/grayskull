@@ -179,6 +179,7 @@ export function App(props: AppProps): React.ReactElement {
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
       thinking: settings.enableThinking,
+      legendary: agent.legendary,
       todo: todoState.items,
       chain: runningRef.current ? chainState.running : null,
       sticky: chainState.sticky
@@ -603,6 +604,7 @@ export function App(props: AppProps): React.ReactElement {
         </Text>
         <Text dimColor>
           {hubConnected ? "⇄ web · " : ""}
+          {agent.legendary ? <Text color="yellow" bold>★ legendary · </Text> : null}
           {settings.enableThinking ? <Text color="cyan">∴ think · </Text> : null}
           {chainChip ? (
             <Text color="magenta">{chainChip}{" · "}</Text>

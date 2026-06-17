@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # playwright MCP artifacts
 .playwright-mcp/
+
+# local scratch: found-on-internet prompt being adapted
+sytemprompt.txt
