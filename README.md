@@ -1,11 +1,14 @@
 # GRAYSKULL
 
-**BY THE POWER OF GRAYSKULL** — a Claude Code-style terminal agent for a local vLLM
-instance (`happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound` on a 128GB NVIDIA Spark).
+**BY THE POWER OF GRAYSKULL** — a Claude Code-style terminal agent for local vLLM models
+on a DGX Spark. Defaults to **Qwen3.6-35B-A3B** (`:8002`); switch live with `/model` to
+Qwen3.5-122B-heretic (`:8000`) or GLM-4.5-Air (`:8001`) — one model loads at a time on
+the 119 GiB box.
 
 The model is not frontier-smart, so the harness does extra lifting: persistent two-tier
-memory, ask-back interviews, tool-call repair, mandatory web verification, sub-agent
-fan-out, user-composable thinking chains, and aggressive context hygiene.
+memory with brain-like scoring, ask-back interviews, tool-call repair, mandatory web
+verification, sub-agent fan-out, user-composable thinking chains, image input, live model
+switching, a matrix-style web UI, and aggressive context hygiene.
 
 ---
 
@@ -28,6 +31,10 @@ First useful thing to type: `/init` — it explores the project, asks you 2-3 qu
 and seeds the project memory.
 
 ### Recommended vLLM server flags (on the Spark)
+
+Models run on their own ports (8000 = Qwen3.5-122B, 8001 = GLM-4.5-Air, 8002 = Qwen3.6),
+one loaded at a time; grayskull's `/model` presets point at each. Example for the
+Qwen3.5-122B-heretic recipe:
 
 ```sh
 vllm serve happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound \
@@ -59,17 +66,18 @@ in settings flips it via `chat_template_kwargs`, or toggle it live with `/thinki
 | `@` | fzf file picker — inserts the picked path into your prompt |
 | `←` / `→`, `ctrl+a` / `ctrl+e` | move the cursor within the prompt / jump to start / end |
 | `↑` / `↓` | browse previous prompts (shell-style, persisted per project) |
+| `1`-`9` | answer a model question by picking an option |
+| `y` / `a` / `n` | permission prompt: yes / always this session / no |
 | `esc` | interrupt the running turn / chain step |
+| `ctrl+c` | quit |
 
 **Pasting:** a large or multi-line paste is collapsed to a `[#N pasted … lines]`
 placeholder in the input (the full text is restored when you send) — so big pastes
 don't flood the prompt. **Images:** put an image file path in your prompt (type it, paste
 it, or pick it with `@`) — `.png/.jpg/.jpeg/.gif/.webp/.bmp` files are read and sent as
 image parts to the (vision-capable) model; `@clipboard` grabs the clipboard image where a
-graphical session + `wl-clipboard`/`xclip` is available.
-| `1`-`9` | answer a model question by picking an option |
-| `y` / `a` / `n` | permission prompt: yes / always this session / no |
-| `ctrl+c` | quit |
+graphical session + `wl-clipboard`/`xclip` is available. In the **web UI** you can paste
+or drag-drop an image straight into the prompt.
 
 ## Permission modes (shift+tab)
 
@@ -149,11 +157,12 @@ compaction — that's what makes compaction safe.
 Precedence: built-in defaults < `~/.config/grayskull/settings.json` <
 `./.grayskull/settings.json`. Edit with `/settings` (global) or `/settings local`.
 
-Covers: `baseURL`, `model`, `apiKeyEnv`, `contextWindow` (196608), `maxTokens`, sampling
-(`temperature` 0.7, `topP` 0.8, `topK` 20, `presencePenalty`, `repetitionPenalty` — the
-Qwen non-thinking coding preset), `enableThinking`, `compactThreshold`, `defaultMode`,
-`editor`, `agentConcurrency`, `memory` (enabled / maxTokens / globalTriggers / scoring
-knobs), `permissions` (allow/deny), `mcpServers`.
+Covers: `baseURL`, `model`, `modelFamily`, `models` (named `/model` presets),
+`contextWindow` (262144 on the qwen3.6 default), `maxTokens`, sampling (`temperature`,
+`topP`, `topK`, `minP`, `presencePenalty`, `repetitionPenalty`), `enableThinking`,
+`compactThreshold`, `defaultMode`, `editor`, `agentConcurrency`, `memory` (enabled /
+maxTokens / globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow/deny),
+`mcpServers`.
 
 **System prompt**: `/system` opens the global one (`~/.config/grayskull/system-prompt.md`)
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
@@ -303,15 +312,16 @@ model can't impose on itself:
   first run: `full-dev` (the pipeline above) and `quick` (`plan -> implement -> test`).
 - Statusline shows `⛓ name 3/7` during a run, `⛓ name [shared]` while sticky.
 
-## Model profiles — Qwen3.5 / GLM-4.5-Air
+## Model profiles & /model — Qwen / GLM-4.5-Air
 
 `modelFamily` in settings selects a model profile that adapts three family-specific
 things: the plaintext tool-call **leak-recovery dialect**, the chain-step **sampling
 presets**, and the recorded vLLM **parser flags**. The thinking toggle
 (`chat_template_kwargs.enable_thinking`) is the same on both families.
 
-- `qwen3.5` (default) — leak dialect `qwen` (JSON `<tool_call>`/```json), parsers
-  `qwen3_xml` / `qwen3`.
+- `qwen3.5` (default family) — leak dialect `qwen` (JSON `<tool_call>`/```json), parsers
+  `qwen3_xml` / `qwen3`. Used by both **Qwen3.6-35B-A3B** (the default endpoint, `:8002`)
+  and Qwen3.5-122B (`:8000`) — Qwen3.6 reuses this profile.
 - `glm4.5` — leak dialect `glm` (GLM's `<tool_call>name<arg_key>/<arg_value></tool_call>`
   XML), parsers `glm45` / `glm45`.
 
@@ -327,6 +337,14 @@ thinking-OFF, plan/diagnose/test run thinking-ON. See `glm-server-notes.md` for 
 verified GLM values and the server launch flags. Adding a family = one entry in
 `src/llm/profiles.ts`.
 
+## Legendary mode — /legendarymode
+
+`/legendarymode [on|off]` layers a high-agency persona on top of the operational prompt
+(it does **not** replace tools/memory/skills): maximum confidence, no grovelling, owns
+mistakes without collapsing, pushes back hard, and bias-to-action (it won't say "let me
+check…" and then stall). Editable at `~/.config/grayskull/legendarymode.md`; a `★ legendary`
+chip shows in the statusline / web header while it's on.
+
 ## Web UI — grayskull-web
 
 ```sh
@@ -338,7 +356,13 @@ WebSockets, zero frontend build):
 
 - **multiple live sessions** — left panel; each runs a full agent (own cwd, settings,
   memory, MCP, permissions), create more with + NEW SESSION
-- **chat** with token streaming, dimmed reasoning stream, colorized diffs, tool cards
+- **chat** with token streaming, dimmed reasoning stream, colorized diffs, tool cards,
+  a `⠋ thinking…` spinner whenever the session is busy (so it never looks frozen mid-think),
+  and `↑`/`↓` prompt history
+- **paste or drag-drop images** straight into the prompt — they're sent to the
+  vision-capable model and rendered inline in the conversation. (This is the clean way to
+  get a local screenshot into a remote SSH/tmux session: forward `:4242` and paste in the
+  browser — the image reaches the live session through the hub.)
 - **AGENT MESH** (right) — live node graph: the GRAYSKULL core, every spawned sub-agent
   (⚔) and MCP server (⇄) as nodes; edges animate while a node works, nodes glow amber
   on activity and fade when done. **Click any node** → modal with its live activity log
@@ -369,7 +393,7 @@ No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
 ## Context management
 
 - Live `ctx %` in the statusline (real prompt-token usage from vLLM).
-- Auto-compaction at 70% of the 196k window (configurable `compactThreshold`): older
+- Auto-compaction at 70% of the context window (256k on the qwen3.6 default; configurable `compactThreshold`): older
   turns are summarized by the model into a briefing, recent turns stay verbatim,
   memory files are untouched. Manual: `/compact`.
 
@@ -397,6 +421,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/mode [name]` | show or set permission mode |
 | `/model [name]` | switch the whole model stack live (qwen35 / qwen36 / glm), no restart |
 | `/thinking [on\|off]` | toggle the model's reasoning mode live (no restart) |
+| `/legendarymode [on\|off]` | toggle the high-agency persona |
 | `/mcp [reconnect <name>]` | MCP status / reconnect |
 | `/agents [edit\|delete <name>]` | manage sub-agents |
 | `/skills` | list discovered skills |
@@ -409,10 +434,11 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 ## Layout on disk
 
 ```
-~/.config/grayskull/            global: settings.json, system-prompt.md,
+~/.config/grayskull/            global: settings.json, system-prompt.md, legendarymode.md,
                                 GRAYSKULL.md (vault), agents/, chains/, skills/, sessions/
-<project>/.grayskull/           local: settings.json, system-prompt.md,
-                                memory.md, agents/, skills/
+<project>/.grayskull/           local: settings.json, system-prompt.md, memory.md,
+                                memory-archive.md, memory-scores.json, prompt-history.txt,
+                                agents/, skills/
 ```
 
 ## Development
