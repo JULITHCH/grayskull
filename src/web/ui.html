@@ -660,6 +660,7 @@ function mem3Layout(graph) {
   mem3.nodes = nodes;
   mem3.links = (graph.links || []).filter((l) => has.has(l.a) && has.has(l.b));
   mem3.sections = sections;
+  mem3.centroids = sections.map((s, i) => ({ section: s, si: i % SECT_COLORS.length, x: cent[s][0], y: cent[s][1], z: cent[s][2] }));
 }
 
 function mem3Update(graph) {
@@ -667,7 +668,7 @@ function mem3Update(graph) {
   if (!graph || !graph.nodes?.length) { mem3.nodes = []; mem3.sig = ""; $("memLegend").textContent = ""; return; }
   const sig = graph.nodes.length + ":" + graph.nodes.map((n) => n.id).join(",");
   if (sig !== mem3.sig) { mem3.sig = sig; mem3Layout(graph); }
-  $("memLegend").innerHTML = mem3.sections.map((s, i) => `<span style="color:${SECT_COLORS[i % 5]}">●</span>${esc(s)}`).join("  ") + "  · size=activation · drag to spin";
+  $("memLegend").textContent = "size = activation · drag to spin · click a node";
 }
 
 function mem3Init() {
@@ -731,6 +732,22 @@ function mem3Frame() {
     ctx.fillStyle = hexA(col, 0.85 * depth); ctx.beginPath(); ctx.arc(p.sx, p.sy, p.r, 0, 6.2832); ctx.fill();
     ctx.strokeStyle = hexA(col, depth); ctx.lineWidth = 1; ctx.stroke();
   }
+  // section labels: float the cluster name above each centroid (rotates with it)
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "bold 11px monospace";
+  for (const cnt of (mem3.centroids || [])) {
+    const x1 = cnt.x * cyw - cnt.z * syw, z1 = cnt.x * syw + cnt.z * cyw;
+    const y2 = cnt.y * cp - z1 * sp, z2 = cnt.y * sp + z1 * cp;
+    const s = focal / (D - z2);
+    const sx = cx + x1 * s, sy = ccy + y2 * s;
+    const depth = Math.max(0.45, Math.min(1, (z2 + 1.2) / 2.4));
+    const col = kami ? "#ff8090" : SECT_COLORS[cnt.si];
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.9)"; ctx.shadowBlur = 4;
+    ctx.fillStyle = hexA(col, depth);
+    ctx.fillText(cnt.section, sx, sy - 0.30 * s - 4);
+    ctx.restore();
+  }
+  ctx.textAlign = "start";
 }
 function openMemNode(id) {
   const m = S.memory[S.current];
