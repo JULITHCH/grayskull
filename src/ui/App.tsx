@@ -373,7 +373,11 @@ export function App(props: AppProps): React.ReactElement {
       let next: QueuedWork | undefined;
       while ((next = queueRef.current.shift()) !== undefined) {
         if (next.kind === "prompt") {
-          pushItem({ type: "user", text: next.display ?? next.text });
+          pushItem(
+            next.images?.length
+              ? { type: "user", text: next.display ?? next.text, images: next.images }
+              : { type: "user", text: next.display ?? next.text },
+          );
           await agent.runTurn(next.text, next.images ?? []);
         } else {
           pushItem({ type: "user", text: `⛓ [${next.def.name}] ${next.task}` });

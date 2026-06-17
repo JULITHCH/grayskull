@@ -41,7 +41,7 @@ export interface ToolDef {
 }
 
 export type TranscriptItem =
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; images?: string[] }
   | { type: "assistant"; text: string; streaming?: boolean }
   | { type: "tool"; name: string; detail: string; preview?: string; result?: string; state: "running" | "done" | "error" | "denied" }
   | { type: "ask"; question: string; answer?: string }

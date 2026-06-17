@@ -258,7 +258,10 @@ export class WebSession {
           next.kind === "prompt"
             ? `${next.text}${imgCount ? `  [📎 ${imgCount} image${imgCount > 1 ? "s" : ""}]` : ""}`
             : `⛓ [${next.def.name}] ${next.task}`;
-        const item: TranscriptItem = { type: "user", text: label };
+        const item: TranscriptItem =
+          next.kind === "prompt" && next.images?.length
+            ? { type: "user", text: label, images: next.images }
+            : { type: "user", text: label };
         this.items.push(item);
         this.send({ t: "item", item });
         if (next.kind === "prompt") {

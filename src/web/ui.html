@@ -55,6 +55,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 #transcript { flex: 1; overflow-y: auto; padding: 10px 14px; scroll-behavior: smooth; }
 .item { margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
 .item.user { color: var(--cyan); }
+.msg-img { max-width: 320px; max-height: 240px; margin-top: 4px; border: 1px solid var(--g-faint); }
 .item.user::before { content: "❯ "; font-weight: 700; }
 .item.assistant { color: #ccffdd; }
 body.kamikazeee .item.assistant { color: #ffd5da; }
@@ -363,7 +364,7 @@ $("newSess").onclick = () => {
 
 /* ── transcript ──────────────────────────────────────────────── */
 function itemHtml(it) {
-  if (it.type === "user") return `<div class="item user">${esc(it.text)}</div>`;
+  if (it.type === "user") return `<div class="item user">${esc(it.text)}${(it.images||[]).map((u) => `<br><img class="msg-img" src="${u}">`).join("")}</div>`;
   if (it.type === "assistant") return `<div class="item assistant">${esc(it.text)}</div>`;
   if (it.type === "note") return `<div class="item note">${esc(it.text)}</div>`;
   if (it.type === "banner") return `<div class="item banner ${it.color === "red" ? "red" : ""}">${esc(it.text)}</div>`;
