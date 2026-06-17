@@ -109,7 +109,10 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
     const session = manager.sessions.get(sid);
     switch (msg["t"]) {
       case "prompt":
-        session?.prompt(String(msg["text"] ?? ""));
+        session?.prompt(
+          String(msg["text"] ?? ""),
+          Array.isArray(msg["images"]) ? (msg["images"] as string[]) : [],
+        );
         break;
       case "answer":
         session?.answer(String(msg["reqId"] ?? ""), String(msg["value"] ?? ""));
@@ -138,6 +141,8 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       });
     },
     websocket: {
+      // pasted screenshots ride the socket as base64 data URLs
+      maxPayloadLength: 64 * 1024 * 1024,
       open(ws) {
         if (ws.data.kind === "cli") return; // waits for its register message
         browsers.add(ws);

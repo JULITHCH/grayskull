@@ -46,7 +46,7 @@ export class WebSession {
   private streamText = "";
   private pending = new Map<string, (answer: string) => void>();
   private pendingCounter = 0;
-  private queue: Array<{ kind: "prompt"; text: string } | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string }> = [];
+  private queue: Array<{ kind: "prompt"; text: string; images?: string[] } | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string }> = [];
   private running = false;
   private todoState: { items: TodoItem[] };
   private sticky: { def: ChainDef; mode: ChainContextMode } | null = null;
@@ -183,7 +183,7 @@ export class WebSession {
     return { sid: this.sid, cwd: this.cwd, mode: this.perms.mode, busy: this.busy };
   }
 
-  prompt(text: string): void {
+  prompt(text: string, images: string[] = []): void {
     if (text.startsWith("/")) {
       void this.handleSlash(text);
       return;
@@ -191,7 +191,7 @@ export class WebSession {
     if (this.sticky) {
       this.queue.push({ kind: "chain", def: this.sticky.def, mode: this.sticky.mode, task: text });
     } else {
-      this.queue.push({ kind: "prompt", text });
+      this.queue.push({ kind: "prompt", text, images });
     }
     void this.drain();
   }
@@ -253,12 +253,16 @@ export class WebSession {
     try {
       let next: (typeof this.queue)[number] | undefined;
       while ((next = this.queue.shift()) !== undefined) {
-        const label = next.kind === "prompt" ? next.text : `⛓ [${next.def.name}] ${next.task}`;
+        const imgCount = next.kind === "prompt" ? (next.images?.length ?? 0) : 0;
+        const label =
+          next.kind === "prompt"
+            ? `${next.text}${imgCount ? `  [📎 ${imgCount} image${imgCount > 1 ? "s" : ""}]` : ""}`
+            : `⛓ [${next.def.name}] ${next.task}`;
         const item: TranscriptItem = { type: "user", text: label };
         this.items.push(item);
         this.send({ t: "item", item });
         if (next.kind === "prompt") {
-          await this.agent.runTurn(next.text);
+          await this.agent.runTurn(next.text, next.images ?? []);
         } else {
           await runChain({
             chain: next.def,

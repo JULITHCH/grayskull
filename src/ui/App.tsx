@@ -313,9 +313,11 @@ export function App(props: AppProps): React.ReactElement {
         switch (msg["t"]) {
           case "prompt": {
             const text = String(msg["text"] ?? "").trim();
-            if (text) {
-              pushItem({ type: "note", text: "⇄ prompt from web" });
-              void submitText(text);
+            const imgs = Array.isArray(msg["images"]) ? (msg["images"] as string[]) : [];
+            if (text || imgs.length) {
+              pushItem({ type: "note", text: `⇄ prompt from web${imgs.length ? ` (+${imgs.length} image)` : ""}` });
+              const shown = imgs.length ? `${text}  [📎 ${imgs.length} image${imgs.length > 1 ? "s" : ""}]` : text;
+              void submitText(text, imgs, shown);
             }
             break;
           }
