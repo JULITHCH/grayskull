@@ -388,6 +388,14 @@ function itemHtml(it) {
 }
 function pushTranscript(sid, it, live) {
   const arr = (S.transcripts[sid] ??= []);
+  // pulse the mesh for every tool event (both running and done) — MCP tool
+  // calls (mcp__<server>__<tool>) light up that server's node, not the core,
+  // so clicking an MCP node shows what it actually did
+  if (it.type === "tool") {
+    const parts = (it.name || "").split("__");
+    const target = parts[0] === "mcp" && parts[1] ? "mcp:" + parts[1] : "core";
+    nodePulse(sid, target, it.detail + " [" + it.state + "]");
+  }
   // replace running tool card when it completes
   if (it.type === "tool" && it.state !== "running") {
     const probe = `data-tool="${esc(it.detail)}"`;
@@ -398,7 +406,6 @@ function pushTranscript(sid, it, live) {
   arr.push(wrapped);
   if (arr.length > 600) arr.shift();
   if (live && sid === S.current) renderTranscript();
-  if (it.type === "tool") nodePulse(sid, "core", it.detail + " [" + it.state + "]");
 }
 const SPIN = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
 let spinFrame = 0;
@@ -544,7 +551,10 @@ function nodeLog(sid, id, line) {
   }
 }
 function nodePulse(sid, id, line) {
-  const n = ensureNode(sid, id, id === "core" ? "GRAYSKULL" : id, id === "core" ? "core" : "agent");
+  const isMcp = id.startsWith("mcp:");
+  const label = id === "core" ? "GRAYSKULL" : isMcp ? id.slice(4) : id;
+  const kind = id === "core" ? "core" : isMcp ? "mcp" : "agent";
+  const n = ensureNode(sid, id, label, kind);
   if (n.state !== "dead") { n.state = "hot"; n.cool = Date.now() + 2500; }
   if (line) nodeLog(sid, id, line);
   renderMesh();
