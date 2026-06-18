@@ -53,6 +53,9 @@ export async function runToolLoop(opts: {
   decide?: (toolName: string, args: Record<string, unknown>) => Promise<{ allowed: boolean; reason?: string }>;
   /** which plaintext tool-call leak format to recover (model-family specific) */
   leakDialect?: LeakDialect;
+  /** called at the top of every loop iteration; mutates `messages` in place to
+   *  free the context window mid-turn (memory-swap / compaction) when it fills */
+  maybeCompact?: (messages: ChatMessage[]) => Promise<void>;
 }): Promise<string> {
   const { client, registry, schemas, messages, ctx, signal } = opts;
   const knownTools = new Set(schemas.map((s) => s.name));
@@ -61,6 +64,9 @@ export async function runToolLoop(opts: {
 
   for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
     if (signal?.aborted) break;
+    // free the window before the next request if the accumulated tool results
+    // have filled it (mid-turn) — keeps a single long turn from overflowing
+    if (opts.maybeCompact) await opts.maybeCompact(messages);
     const result = await client.complete(
       messages,
       schemas,
@@ -336,6 +342,34 @@ export class GrayskullAgent {
     this.history = await compact(this.client, this.history);
   }
 
+  /** Mid-turn context management: called before each tool-loop request. If the
+   *  window (system + conversation) is over threshold, free it in place —
+   *  keep the system message (memory/skills), swap/compact the conversation. */
+  private async compactInLoop(messages: ChatMessage[]): Promise<void> {
+    if (
+      !needsCompaction(messages, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens)
+    ) {
+      return;
+    }
+    const system = messages[0];
+    if (!system) return;
+    const conv = messages.slice(1);
+    if (conv.length <= 1) return; // nothing to free
+    try {
+      let tail: ChatMessage[];
+      if (this.settings.compactStrategy === "memory-swap") {
+        tail = await memorySwap(this.client, conv);
+        this.ui.pushItem({ type: "note", text: "🧠 context full mid-task → state saved, window cleared, continuing" });
+      } else {
+        tail = await compact(this.client, conv);
+        this.ui.pushItem({ type: "note", text: "context compacted mid-task" });
+      }
+      messages.splice(0, messages.length, system, ...tail); // mutate in place (caller holds this ref)
+    } catch {
+      // leave messages as-is; the next request may still fit or error cleanly
+    }
+  }
+
   async runTurn(userText: string, images: string[] = []): Promise<string> {
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -465,6 +499,7 @@ export class GrayskullAgent {
       registry: this.registry,
       schemas: this.registry.schemas(),
       leakDialect: this.leakDialect,
+      maybeCompact: (m) => this.compactInLoop(m),
       messages,
       ctx,
       signal,

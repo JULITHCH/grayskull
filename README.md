@@ -403,7 +403,9 @@ No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
     of losing the thread.
   - **`summarize`** — classic compaction (model summary + keep recent turns verbatim).
   Project/global memory is injected every turn regardless, so durable facts always survive.
-  Manual: `/compact`.
+  The check runs both at turn boundaries **and mid-turn** (before each tool-loop request),
+  so a single long turn whose tool results fill the window swaps itself and keeps going
+  instead of overflowing. Manual: `/compact`.
 
 ## Sessions
 

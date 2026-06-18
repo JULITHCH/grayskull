@@ -24,7 +24,11 @@ rendered dimmed, never scanned for tool calls.
 - `agent/compact.ts` — context-full handling at `compactThreshold`. `compactStrategy`:
   `memory-swap` (default) writes a task-continuation handoff brief via `memorySwap`,
   fully clears history, reseeds with the brief (model resumes from brief + injected
-  memory); `summarize` is classic `compact` (summary + keep-recent). Both in `runTurn`.
+  memory); `summarize` is classic `compact` (summary + keep-recent). Fires at turn start
+  (`runTurn`, on `this.history`) AND mid-turn: `runToolLoop` calls `opts.maybeCompact`
+  before each request → `GrayskullAgent.compactInLoop` splices `messages` in place
+  (keeps the system message, swaps the conversation tail) so a long single turn frees
+  its own window.
 - `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
   (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
   in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`
