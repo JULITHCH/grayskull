@@ -345,6 +345,11 @@ function handle(m) {
     case "ask_req": S.pendingAsk = m; showAsk(); break;
     case "perm_done": if (S.pendingPerm?.reqId === m.reqId) { S.pendingPerm = null; closeModal("permModalBg"); } break;
     case "ask_done": if (S.pendingAsk?.reqId === m.reqId) { S.pendingAsk = null; closeModal("askModalBg"); } break;
+    case "confirm_create":
+      if (confirm("Directory doesn't exist:\n" + m.cwd + "\n\nCreate it and start the session?")) {
+        send({ t: "new_session", cwd: m.cwd, create: true });
+      }
+      break;
     case "error": toast(m.text); break;
   }
 }

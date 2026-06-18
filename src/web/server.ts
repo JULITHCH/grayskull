@@ -92,12 +92,14 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
     broadcast({ sid, ...msg });
   };
 
-  const handleBrowserMessage = (msg: Record<string, unknown>) => {
+  const handleBrowserMessage = (ws: Bun.ServerWebSocket<WsData>, msg: Record<string, unknown>) => {
     const sid = String(msg["sid"] ?? "");
     if (msg["t"] === "new_session") {
-      const result = manager.create(String(msg["cwd"] || opts.defaultCwd));
-      if ("error" in result) broadcast({ t: "error", text: result.error });
-      broadcastSessions();
+      const cwd = String(msg["cwd"] || opts.defaultCwd);
+      const result = manager.create(cwd, Boolean(msg["create"]));
+      if ("needsCreate" in result) ws.send(JSON.stringify({ t: "confirm_create", cwd: result.needsCreate }));
+      else if ("error" in result) broadcast({ t: "error", text: result.error });
+      else broadcastSessions();
       return;
     }
     // commands for an attached CLI session are forwarded to its socket
@@ -177,7 +179,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
           return;
         }
         if (ws.data.kind === "cli") handleCliMessage(ws, msg);
-        else handleBrowserMessage(msg);
+        else handleBrowserMessage(ws, msg);
       },
     },
   });

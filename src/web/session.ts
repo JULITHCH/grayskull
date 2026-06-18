@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import type { PermissionMode, TranscriptItem } from "../types";
 import { MODE_ORDER } from "../types";
 import { loadSettings, type Settings } from "../config/settings";
@@ -318,8 +318,15 @@ export class SessionManager {
     this.broadcast = broadcast;
   }
 
-  create(cwd: string): WebSession | { error: string } {
-    if (!existsSync(cwd)) return { error: `directory not found: ${cwd}` };
+  create(cwd: string, createDir = false): WebSession | { error: string } | { needsCreate: string } {
+    if (!existsSync(cwd)) {
+      if (!createDir) return { needsCreate: cwd };
+      try {
+        mkdirSync(cwd, { recursive: true });
+      } catch (err) {
+        return { error: `could not create ${cwd}: ${(err as Error).message}` };
+      }
+    }
     try {
       const session = new WebSession(cwd, this.broadcast);
       this.sessions.set(session.sid, session);
