@@ -170,6 +170,20 @@ export const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "inject",
+    description: "steer the running task live: /inject <message>",
+    run: async (ctx, args) => {
+      const text = args.trim();
+      if (!text) return note(ctx, "usage: /inject <message> — steers the task the model is currently working on");
+      if (ctx.agent.isActive()) {
+        ctx.agent.inject(text);
+        return note(ctx, "↪ steering injected — the model will see it at its next step");
+      }
+      // nothing running to steer → just send it as a normal prompt
+      return { prompt: text };
+    },
+  },
+  {
     name: "compact",
     description: "compact the conversation now",
     run: async (ctx) => {

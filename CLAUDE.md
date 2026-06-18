@@ -21,6 +21,10 @@ rendered dimmed, never scanned for tool calls.
   memory extraction). UI talks to it via the mutable `UiBridge` object filled in by App.
 - `agent/repair.ts` — weak-model accommodations: zod-validated tool args with retry
   messages, recovery of tool calls emitted as plain text/`<tool_call>` blocks.
+- live steering: `/inject` → `GrayskullAgent.inject()` queues text; `runToolLoop` drains
+  it via `opts.drainInjections` at each iteration top (after maybeCompact) and appends it
+  as a user message before the next request. `agent.isActive()` lets `/inject` fall back
+  to a normal prompt when idle. Plain mid-run input still queues (UI `queueRef`).
 - `agent/compact.ts` — context-full handling at `compactThreshold`. `compactStrategy`:
   `memory-swap` (default) writes a task-continuation handoff brief via `memorySwap`,
   fully clears history, reseeds with the brief (model resumes from brief + injected

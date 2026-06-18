@@ -79,6 +79,12 @@ image parts to the (vision-capable) model; `@clipboard` grabs the clipboard imag
 graphical session + `wl-clipboard`/`xclip` is available. In the **web UI** you can paste
 or drag-drop an image straight into the prompt.
 
+**Steering a running task:** anything you type while the model is working queues as a new
+turn (runs after). To change course *without waiting* or hitting `esc`, use
+**`/inject <message>`** — it's folded into the live tool loop at the model's next step, so
+it adjusts mid-task (e.g. `/inject reuse the helper in utils.ts, don't write a new one`).
+A `↪ steering` note shows when it lands. Works in the terminal and the web UI.
+
 ## Permission modes (shift+tab)
 
 | mode | behavior |
@@ -427,6 +433,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/memory [edit [global]]` | show / edit memories |
 | `/remember <fact>` | save to the global vault |
 | `/forget <pattern>` | prune project memory |
+| `/inject <msg>` | steer the *running* task live (injected at the model's next step) |
 | `/compact` | compact the conversation now |
 | `/mode [name]` | show or set permission mode |
 | `/model [name]` | switch the whole model stack live (qwen35 / qwen36 / glm), no restart |

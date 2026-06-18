@@ -56,6 +56,9 @@ export async function runToolLoop(opts: {
   /** called at the top of every loop iteration; mutates `messages` in place to
    *  free the context window mid-turn (memory-swap / compaction) when it fills */
   maybeCompact?: (messages: ChatMessage[]) => Promise<void>;
+  /** drains user steering messages typed mid-run (via /inject); each is appended
+   *  to the conversation before the next model call so it changes course live */
+  drainInjections?: () => string[];
 }): Promise<string> {
   const { client, registry, schemas, messages, ctx, signal } = opts;
   const knownTools = new Set(schemas.map((s) => s.name));
@@ -67,6 +70,12 @@ export async function runToolLoop(opts: {
     // free the window before the next request if the accumulated tool results
     // have filled it (mid-turn) — keeps a single long turn from overflowing
     if (opts.maybeCompact) await opts.maybeCompact(messages);
+    // live steering: fold in anything the user injected while we were working,
+    // after any swap so it survives verbatim into the next model call
+    for (const text of opts.drainInjections?.() ?? []) {
+      messages.push({ role: "user", content: `[Steering update from the user, sent while you were working — apply it now]:\n${text}` });
+      ctx.note(`↪ steering: ${text}`);
+    }
     const result = await client.complete(
       messages,
       schemas,
@@ -219,8 +228,20 @@ export class GrayskullAgent {
   private ui: UiBridge;
   private cwd: string;
   private abort: AbortController | null = null;
+  /** user steering messages typed mid-run (via /inject), drained by the loop. */
+  private injections: string[] = [];
   /** True if the most recent runTurn/runIsolated was interrupted (esc). */
   lastInterrupted = false;
+
+  /** A turn is currently running (so /inject should steer rather than submit). */
+  isActive(): boolean {
+    return this.abort !== null;
+  }
+
+  /** Queue a steering message; the running tool loop folds it in at its next step. */
+  inject(text: string): void {
+    if (text.trim()) this.injections.push(text.trim());
+  }
   /** Set by the sub-agent module so spawn_agent can run nested loops. */
   agentListing: () => string = () => "";
   /** Set at startup; lists SKILL.md skills for the system prompt. */
@@ -500,6 +521,12 @@ export class GrayskullAgent {
       schemas: this.registry.schemas(),
       leakDialect: this.leakDialect,
       maybeCompact: (m) => this.compactInLoop(m),
+      drainInjections: () => {
+        if (this.injections.length === 0) return [];
+        const out = this.injections;
+        this.injections = [];
+        return out;
+      },
       messages,
       ctx,
       signal,
