@@ -44,11 +44,11 @@ const ModelPresetSchema = z.object({
 export type ModelPreset = z.infer<typeof ModelPresetSchema>;
 
 export const SettingsSchema = z.object({
-  // defaults to Qwen3.6-35B-A3B on :8002 (reuses the qwen3.5 model profile);
-  // /model qwen35 / glm switch the whole stack live.
-  baseURL: z.string().default("http://10.8.0.22:8002/v1"),
+  // defaults to Qwen3.6-35B-A3B NVFP4 on 10.8.0.22:8003 (reuses the qwen3.5 model
+  // profile); /model qwen36 / qwen35 / glm switch the whole stack live.
+  baseURL: z.string().default("http://10.8.0.22:8003/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
-  model: z.string().default("qwen3.6-35b-a3b"),
+  model: z.string().default("qwen3.6-35b-a3b-nvfp4"),
   /** model family — selects leak-recovery dialect + chain-step sampling presets. */
   modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
   contextWindow: z.number().default(262144),
@@ -77,9 +77,23 @@ export const SettingsSchema = z.object({
         topP: 0.8,
         topK: 20,
       },
+      "qwen36-nvfp4": {
+        // Qwen3.6-35B-A3B NVFP4 (DGX Spark build) on :8003 — the preferred,
+        // faster (~120 tok/s) Qwen3.6 build; reuses the qwen3.5 profile.
+        // MTP spec-decoding is transparent; reasoning_content stays empty on
+        // this vLLM build (the answer is in content). Launch:
+        // ~/work/start-model.sh qwen36-nvfp4
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8003/v1",
+        model: "qwen3.6-35b-a3b-nvfp4",
+        contextWindow: 262144,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+      },
       qwen36: {
-        // Qwen3.6-35B-A3B (FP8) on :8002; reuses the qwen3.5 model profile
-        // (leak dialect + chain presets). served-model-name + ctx verified live.
+        // Qwen3.6-35B-A3B (FP8 + DFlash) on :8002 — same model, slower build.
+        // reuses the qwen3.5 model profile (leak dialect + chain presets).
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8002/v1",
         model: "qwen3.6-35b-a3b",
