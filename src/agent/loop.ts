@@ -87,16 +87,22 @@ export async function runToolLoop(opts: {
     opts.onAssistantDone?.(result.text);
 
     // weak-model recovery: tool call emitted as text instead of tool_calls
+    let recoveredFromText = false;
     if (toolCalls.length === 0 && result.text) {
       const recovered = recoverTextToolCall(result.text, knownTools, opts.leakDialect);
-      if (recovered) toolCalls = [recovered];
+      if (recovered) {
+        toolCalls = [recovered];
+        recoveredFromText = true;
+      }
     }
 
     // store args sanitized to valid JSON so replaying them never 400s the GLM
-    // server; execution below still reads the raw `toolCalls` for repair hints
+    // server; execution below still reads the raw `toolCalls` for repair hints.
+    // when the call was recovered FROM the text, the text *is* the malformed
+    // call — drop it so the leaked markup isn't kept in history or replayed.
     messages.push({
       role: "assistant",
-      content: result.text || null,
+      content: recoveredFromText ? null : result.text || null,
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(sanitizeToolCallArgs) } : {}),
     });
 

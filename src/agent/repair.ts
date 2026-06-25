@@ -85,7 +85,71 @@ export function recoverTextToolCall(
     const glm = recoverGlmToolCall(text, knownTools);
     if (glm) return glm;
   }
-  return recoverJsonToolCall(text, knownTools);
+  const json = recoverJsonToolCall(text, knownTools);
+  if (json) return json;
+  // last resort: the loose XML-ish dialect some Qwen3.6 builds derail into
+  return recoverXmlNamedToolCall(text, knownTools);
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** First known-tool marker at/after `from`, written as `[name]` or `<name …>`. */
+function findToolMarker(
+  text: string,
+  knownTools: Set<string>,
+  from = 0,
+): { name: string; start: number; end: number } | null {
+  let best: { name: string; start: number; end: number } | null = null;
+  for (const t of knownTools) {
+    const re = new RegExp(`\\[${escapeRe(t)}\\]|<${escapeRe(t)}(?:\\s[^>]*)?>`, "g");
+    re.lastIndex = from;
+    const m = re.exec(text);
+    if (m && (best === null || m.index < best.start)) {
+      best = { name: t, start: m.index, end: m.index + m[0].length };
+    }
+  }
+  return best;
+}
+
+function coerceArg(args: Record<string, unknown>, key: string, raw: string): void {
+  const v = raw.trim();
+  try {
+    args[key] = JSON.parse(v);
+  } catch {
+    args[key] = v;
+  }
+}
+
+/**
+ * Recover a tool call emitted in the loose XML-ish dialect some Qwen3.6 builds
+ * fall into mid-stream: the tool name in [brackets] or <angle> tags, then one
+ * argument tag per field — either `<key>value</key>` or
+ * `<parameter name="key">value</parameter>`. Tolerant of the stray `</think>`
+ * / `</parameter>` fragments these glitches sprinkle in. Only fires when the
+ * leading token is a known tool and at least one argument tag follows; args are
+ * scoped to the first call (cut at the next tool marker) so chained leaks don't
+ * bleed together.
+ */
+function recoverXmlNamedToolCall(text: string, knownTools: Set<string>): ToolCall | null {
+  const marker = findToolMarker(text, knownTools);
+  if (!marker) return null;
+  const next = findToolMarker(text, knownTools, marker.end);
+  const segment = text.slice(marker.end, next ? next.start : undefined);
+  const args: Record<string, unknown> = {};
+  for (const m of segment.matchAll(/<parameter\s+name=["']?([\w-]+)["']?\s*>([\s\S]*?)<\/parameter>/gi)) {
+    coerceArg(args, m[1]!, m[2]!);
+  }
+  for (const m of segment.matchAll(/<([\w-]+)>([\s\S]*?)<\/\1>/g)) {
+    const key = m[1]!;
+    if (key === "parameter" || key === "think" || knownTools.has(key) || key in args) continue;
+    coerceArg(args, key, m[2]!);
+  }
+  if (Object.keys(args).length === 0) return null;
+  return {
+    id: "recovered_0",
+    type: "function",
+    function: { name: marker.name, arguments: JSON.stringify(args) },
+  };
 }
 
 function recoverJsonToolCall(text: string, knownTools: Set<string>): ToolCall | null {

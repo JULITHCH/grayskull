@@ -42,6 +42,74 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
   return total;
 }
 
+/**
+ * Stream splitter for models that leak `<think>…</think>` into `content`
+ * instead of the separate reasoning field. Text inside think tags is sent to
+ * `onReason` (rendered dimmed) and kept out of the answer; a stray `</think>`
+ * with no opener is dropped. Tags split across chunk boundaries are buffered:
+ * a trailing partial that could begin a tag is held back until the next chunk.
+ */
+export function makeThinkFilter(onText: (s: string) => void, onReason: (s: string) => void) {
+  const OPEN = "<think>";
+  const CLOSE = "</think>";
+  let inThink = false;
+  let buf = "";
+  // longest suffix of `s` that is a nonempty prefix of OPEN or CLOSE — the part
+  // we must hold back because it might be the start of a tag finishing next chunk
+  const heldTail = (s: string): number => {
+    const max = Math.min(s.length, CLOSE.length - 1);
+    for (let k = max; k > 0; k--) {
+      const suf = s.slice(s.length - k);
+      if (OPEN.startsWith(suf) || CLOSE.startsWith(suf)) return k;
+    }
+    return 0;
+  };
+  const feed = (chunk: string): void => {
+    buf += chunk;
+    for (;;) {
+      if (inThink) {
+        const i = buf.indexOf(CLOSE);
+        if (i === -1) {
+          const hold = heldTail(buf);
+          const emit = buf.slice(0, buf.length - hold);
+          if (emit) onReason(emit);
+          buf = buf.slice(buf.length - hold);
+          return;
+        }
+        if (i > 0) onReason(buf.slice(0, i));
+        buf = buf.slice(i + CLOSE.length);
+        inThink = false;
+      } else {
+        const o = buf.indexOf(OPEN);
+        const c = buf.indexOf(CLOSE);
+        const next = o === -1 ? c : c === -1 ? o : Math.min(o, c);
+        if (next === -1) {
+          const hold = heldTail(buf);
+          const emit = buf.slice(0, buf.length - hold);
+          if (emit) onText(emit);
+          buf = buf.slice(buf.length - hold);
+          return;
+        }
+        if (next > 0) onText(buf.slice(0, next));
+        if (next === o) {
+          buf = buf.slice(o + OPEN.length);
+          inThink = true;
+        } else {
+          // stray </think> with no opener — drop it and carry on
+          buf = buf.slice(c + CLOSE.length);
+        }
+      }
+    }
+  };
+  const flush = (): void => {
+    if (!buf) return;
+    if (inThink) onReason(buf);
+    else onText(buf);
+    buf = "";
+  };
+  return { feed, flush };
+}
+
 export class LlmClient {
   private client: OpenAI;
   private settings: Settings;
@@ -132,6 +200,17 @@ export class LlmClient {
     let usage: Usage | null = null;
     // tool call fragments arrive as deltas keyed by index
     const toolFrags = new Map<number, { id: string; name: string; args: string }>();
+    // some builds (e.g. the Qwen3.6 NVFP4 spin) don't reliably populate the
+    // separate reasoning field — they leak <think>…</think> straight into
+    // content. Route inline think to the dimmed reasoning channel so it never
+    // renders as the answer or gets scanned for tool calls.
+    const think = makeThinkFilter(
+      (s) => {
+        text += s;
+        callbacks.onTextDelta?.(s);
+      },
+      (s) => callbacks.onReasoningDelta?.(s),
+    );
 
     for await (const chunk of stream) {
       const choice = chunk.choices?.[0];
@@ -145,10 +224,7 @@ export class LlmClient {
       if (typeof reasoning === "string" && reasoning) {
         callbacks.onReasoningDelta?.(reasoning);
       }
-      if (delta?.content) {
-        text += delta.content;
-        callbacks.onTextDelta?.(delta.content);
-      }
+      if (delta?.content) think.feed(delta.content);
       for (const tc of delta?.tool_calls ?? []) {
         const frag = toolFrags.get(tc.index) ?? { id: "", name: "", args: "" };
         if (tc.id) frag.id = tc.id;
@@ -163,6 +239,7 @@ export class LlmClient {
         };
       }
     }
+    think.flush();
 
     if (usage) {
       this.lastPromptTokens = usage.promptTokens;
