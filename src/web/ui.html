@@ -220,6 +220,7 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
       </div>
       <div style="flex:1"></div>
       <span id="busyTxt"></span>
+      <span id="tpsTxt" title="decode throughput (completion tokens/sec)" style="margin-right:10px;color:var(--g-dim)"></span>
       <div id="ctxBar" title="context fill"><div id="ctxFill"></div></div>
       <span id="ctxTxt">ctx 0%</span>
     </div>
@@ -526,6 +527,7 @@ function renderStatus() {
   $("ctxFill").style.width = (st.ctxPct ?? 0) + "%";
   $("ctxFill").style.background = (st.ctxPct ?? 0) > 70 ? "var(--amber)" : "var(--g-dim)";
   $("ctxTxt").textContent = "ctx " + (st.ctxPct ?? 0) + "%";
+  $("tpsTxt").textContent = st.tps ? st.tps + " tok/s" : "";
   $("busyTxt").textContent = st.busy ? "⣾ " + (st.what || "working") + " " : "";
   document.querySelectorAll(".modeBtn").forEach((b) => b.classList.toggle("active", b.dataset.mode === st.mode));
   const kami = st.mode === "kamikazeee";

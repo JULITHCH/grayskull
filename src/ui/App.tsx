@@ -194,6 +194,7 @@ export function App(props: AppProps): React.ReactElement {
       // a turn ends inside the drain loop, which would stick the web UI on "working")
       busy: busyRef.current,
       ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
+      tps: Math.round(client.lastTokensPerSec),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
       thinking: settings.enableThinking,
@@ -588,6 +589,7 @@ export function App(props: AppProps): React.ReactElement {
     100,
     Math.round((client.lastPromptTokens / settings.contextWindow) * 100),
   );
+  const tps = Math.round(client.lastTokensPerSec);
   const mcpConnected = [...mcp.statuses.values()].filter((s) => s.state === "connected").length;
   const todoOpen = todoState.items.filter((i) => !i.done).length;
   const streamTail = streamText.split("\n").slice(-STREAM_TAIL_LINES).join("\n");
@@ -677,6 +679,7 @@ export function App(props: AppProps): React.ReactElement {
           ) : null}
           {memFlash ? `${memFlash} · ` : ""}
           {todoOpen > 0 ? `todo ${todoOpen} · ` : ""}
+          {tps > 0 ? `${tps} tok/s · ` : ""}
           ctx {ctxPct}% · mcp {mcpConnected}/{mcp.statuses.size}
         </Text>
       </Box>

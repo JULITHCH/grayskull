@@ -117,6 +117,9 @@ export class LlmClient {
   lastPromptTokens = 0;
   /** running total of completion tokens (for per-step throughput reporting). */
   cumCompletionTokens = 0;
+  /** decode throughput of the latest request (completion tok/s) — feeds the
+   *  statusline; updated live while streaming, finalized from vLLM usage. */
+  lastTokensPerSec = 0;
   /** transient per-request sampling+thinking override (set per chain step). */
   private override: InferenceProfile | null = null;
 
@@ -140,6 +143,7 @@ export class LlmClient {
   reconfigure(): void {
     this.client = this.buildClient();
     this.lastPromptTokens = 0;
+    this.lastTokensPerSec = 0;
   }
 
   /** Apply a chain-step inference profile (thinking + sampling, flipped
@@ -212,6 +216,23 @@ export class LlmClient {
       (s) => callbacks.onReasoningDelta?.(s),
     );
 
+    // decode-rate tracking: time from the first generated token to the last,
+    // counting reasoning + content + tool-arg tokens (estimated live, then
+    // replaced by vLLM's exact completion count). prefill latency is excluded
+    // so the figure reflects pure generation speed.
+    let firstTokenAt = 0;
+    let lastTokenAt = 0;
+    let estGen = 0;
+    const bumpGen = (s: string): void => {
+      if (!s) return;
+      const now = Date.now();
+      if (firstTokenAt === 0) firstTokenAt = now;
+      lastTokenAt = now;
+      estGen += estimateTokens(s);
+      const secs = (lastTokenAt - firstTokenAt) / 1000;
+      if (secs >= 0.05) this.lastTokensPerSec = estGen / secs;
+    };
+
     for await (const chunk of stream) {
       const choice = chunk.choices?.[0];
       const delta = choice?.delta;
@@ -223,14 +244,19 @@ export class LlmClient {
       const reasoning = d?.["reasoning"] ?? d?.["reasoning_content"];
       if (typeof reasoning === "string" && reasoning) {
         callbacks.onReasoningDelta?.(reasoning);
+        bumpGen(reasoning);
       }
-      if (delta?.content) think.feed(delta.content);
+      if (delta?.content) {
+        think.feed(delta.content);
+        bumpGen(delta.content);
+      }
       for (const tc of delta?.tool_calls ?? []) {
         const frag = toolFrags.get(tc.index) ?? { id: "", name: "", args: "" };
         if (tc.id) frag.id = tc.id;
         if (tc.function?.name) frag.name += tc.function.name;
         if (tc.function?.arguments) frag.args += tc.function.arguments;
         toolFrags.set(tc.index, frag);
+        bumpGen((tc.function?.name ?? "") + (tc.function?.arguments ?? ""));
       }
       if (chunk.usage) {
         usage = {
@@ -244,6 +270,9 @@ export class LlmClient {
     if (usage) {
       this.lastPromptTokens = usage.promptTokens;
       this.cumCompletionTokens += usage.completionTokens;
+      // finalize tok/s from the authoritative completion count
+      const secs = (lastTokenAt - firstTokenAt) / 1000;
+      if (secs >= 0.05) this.lastTokensPerSec = usage.completionTokens / secs;
     }
 
     const toolCalls: ToolCall[] = [...toolFrags.entries()]

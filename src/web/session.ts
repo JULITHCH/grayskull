@@ -151,6 +151,7 @@ export class WebSession {
       busy: this.busy,
       what: this.busyWhat,
       ctxPct: Math.min(100, Math.round((this.client.lastPromptTokens / this.settings.contextWindow) * 100)),
+      tps: Math.round(this.client.lastTokensPerSec),
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: this.settings.model,
       thinking: this.settings.enableThinking,
