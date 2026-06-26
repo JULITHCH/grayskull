@@ -530,8 +530,9 @@ function renderStatus() {
   $("tpsTxt").textContent = st.tps ? st.tps + " tok/s" : "";
   $("busyTxt").textContent = st.busy ? "⣾ " + (st.what || "working") + " " : "";
   document.querySelectorAll(".modeBtn").forEach((b) => b.classList.toggle("active", b.dataset.mode === st.mode));
+  // kamikazeee: keep the normal skin — just flash the warning chip on top
+  // (the full red theme via body.kamikazeee was too much)
   const kami = st.mode === "kamikazeee";
-  document.body.classList.toggle("kamikazeee", kami);
   $("kamiChip").style.display = kami ? "" : "none";
   $("kamiChip").className = "chip alert";
   // mcp nodes
