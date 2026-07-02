@@ -9,10 +9,11 @@ import { detectGlobalTrigger } from "../memory/memory";
 import { validateCall, recoverTextToolCall, sanitizeToolCallArgs } from "./repair";
 import { needsCompaction, compact, memorySwap } from "./compact";
 import { runDiagnostics } from "./diagnostics";
-import { autoMatchSkills, autoSkillBlock, type SkillDef } from "../skills/registry";
+import { autoMatchSkills, autoSkillBlock, loadSkills, type SkillDef } from "../skills/registry";
+import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
 import type { ModelPreset } from "../config/settings";
-import { resolveStepProfile } from "../chains/registry";
+import { resolveStepProfile, resolveStepConfig } from "../chains/registry";
 import type { ChainDef } from "../chains/registry";
 import { spawnSync } from "node:child_process";
 
@@ -238,6 +239,9 @@ export class GrayskullAgent {
   private injections: string[] = [];
   /** True if the most recent runTurn/runIsolated was interrupted (esc). */
   lastInterrupted = false;
+  /** Error message if the most recent runTurn/runIsolated failed (e.g. a model
+   *  400), else null. Lets the chain runner tell "errored" from "no output". */
+  lastError: string | null = null;
 
   /** A turn is currently running (so /inject should steer rather than submit). */
   isActive(): boolean {
@@ -251,7 +255,7 @@ export class GrayskullAgent {
   /** Set by the sub-agent module so spawn_agent can run nested loops. */
   agentListing: () => string = () => "";
   /** Set at startup; lists SKILL.md skills for the system prompt. */
-  skillListing: () => string = () => "";
+  skillListing: (exclude?: Set<string>) => string = () => "";
 
   /** /legendarymode — layers the legendary persona on top of the operational
    *  prompt (session toggle, like thinking). */
@@ -262,10 +266,19 @@ export class GrayskullAgent {
     return modelProfile(this.settings.modelFamily).leakDialect;
   }
 
-  /** Resolve a chain step's inference profile (thinking + sampling) for this
-   *  model family, honouring per-chain overrides. */
+  /** Resolve a chain step's inference profile (thinking + sampling) for the
+   *  CURRENT model family, honouring per-chain preset overrides and then the
+   *  step's `steps:` block knobs (think/temp). Call AFTER any per-step model
+   *  switch so `modelFamily` already reflects the step's model. */
   resolveChainStepProfile(step: string, chain: ChainDef): InferenceProfile {
-    return resolveStepProfile(step, chain, this.settings.modelFamily);
+    const base = resolveStepProfile(step, chain, this.settings.modelFamily);
+    const cfg = resolveStepConfig(step, chain);
+    if (!cfg) return base;
+    return {
+      ...base,
+      enableThinking: cfg.enableThinking ?? base.enableThinking,
+      temperature: cfg.temperature ?? base.temperature,
+    };
   }
 
   /** Apply (or clear with null) a step's profile on the shared client. */
@@ -283,6 +296,7 @@ export class GrayskullAgent {
     s.model = preset.model;
     if (preset.apiKeyEnv !== undefined) s.apiKeyEnv = preset.apiKeyEnv;
     if (preset.contextWindow !== undefined) s.contextWindow = preset.contextWindow;
+    if (preset.maxTokens !== undefined) s.maxTokens = preset.maxTokens;
     if (preset.temperature !== undefined) s.temperature = preset.temperature;
     if (preset.topP !== undefined) s.topP = preset.topP;
     if (preset.topK !== undefined) s.topK = preset.topK;
@@ -293,6 +307,30 @@ export class GrayskullAgent {
 
   get modelName(): string {
     return this.settings.model;
+  }
+
+  /** Snapshot the live model stack as a preset, so a chain can restore the
+   *  session model after per-step switches. */
+  snapshotModelPreset(): ModelPreset {
+    const s = this.settings;
+    return {
+      family: s.modelFamily,
+      baseURL: s.baseURL,
+      model: s.model,
+      apiKeyEnv: s.apiKeyEnv,
+      contextWindow: s.contextWindow,
+      maxTokens: s.maxTokens,
+      temperature: s.temperature,
+      topP: s.topP,
+      topK: s.topK,
+      minP: s.minP,
+      enableThinking: s.enableThinking,
+    };
+  }
+
+  /** A named model preset from settings.models (for per-step chain switches). */
+  lookupModelPreset(name: string): ModelPreset | undefined {
+    return this.settings.models[name];
   }
 
   constructor(opts: {
@@ -317,15 +355,77 @@ export class GrayskullAgent {
     this.abort?.abort();
   }
 
-  /** Harness-side skill utilization: match the task text, inject winners,
-   *  tell the user. The model cannot skip what is already in its context. */
+  /** Shared with the skill tool: skills blocked for the current chain step. */
+  skillGate: SkillGate = { forbidden: new Set() };
+  /** Skills force-loaded for the current chain step (cleared between steps). */
+  private stepRequiredSkills = new Set<string>();
+
+  /** Set per chain step (see runChain): force-load `required`, block `forbidden`
+   *  from both auto-load and the skill tool. Empty arrays clear the overrides. */
+  setStepSkills(required: string[], forbidden: string[]): void {
+    this.stepRequiredSkills = new Set(required);
+    this.skillGate.forbidden = new Set(forbidden);
+  }
+
+  /** Per chain step MCP-tool gating. null = no gating (all tools, the normal
+   *  default + back-compat for chains without an mcp setting). */
+  private stepMcp: { enabled: boolean; tools: Set<string> } | null = null;
+
+  /** Set per chain step. `enabled` undefined clears the gate (all tools);
+   *  false disables MCP tools; true enables them (all, or the `tools` subset). */
+  setStepMcp(enabled: boolean | undefined, tools: string[]): void {
+    this.stepMcp = enabled === undefined ? null : { enabled, tools: new Set(tools) };
+  }
+
+  /** Per chain step sub-agent gating. null = inherit (tools available). */
+  private stepSubagents: boolean | null = null;
+
+  /** Set per chain step: undefined inherits, false removes spawn_agent/create_agent. */
+  setStepSubagents(enabled: boolean | undefined): void {
+    this.stepSubagents = enabled === undefined ? null : enabled;
+  }
+
+  /** All registered MCP tool names (`mcp__server__tool`) — for the chain editor. */
+  mcpToolNames(): string[] {
+    return this.registry.list().map((t) => t.name).filter((n) => n.startsWith("mcp__"));
+  }
+
+  /** The `only` filter for registry.schemas() under the current step's gates.
+   *  Non-gated tools (builtins, skill) are always kept. */
+  private toolFilter(): string[] | undefined {
+    const m = this.stepMcp;
+    const sub = this.stepSubagents;
+    if (!m && sub === null) return undefined; // no gating → all tools
+    const SUBAGENT = new Set(["spawn_agent", "create_agent"]);
+    let keep = this.registry.list().map((t) => t.name);
+    // sub-agent gate: off → drop the spawn tools
+    if (sub === false) keep = keep.filter((n) => !SUBAGENT.has(n));
+    // MCP gate
+    if (m) {
+      if (!m.enabled) keep = keep.filter((n) => !n.startsWith("mcp__"));
+      else if (m.tools.size > 0) keep = keep.filter((n) => !n.startsWith("mcp__") || m.tools.has(n));
+    }
+    return keep;
+  }
+
+  /** Harness-side skill utilization: force-load required skills, auto-match the
+   *  task text (minus forbidden), inject winners, tell the user. The model cannot
+   *  skip what is already in its context. */
   private autoSkills(taskText: string): SkillDef[] {
     try {
-      const matched = autoMatchSkills(taskText, this.cwd);
-      for (const s of matched) {
-        this.ui.pushItem({ type: "note", text: `⚡ skill auto-loaded: ${s.name}` });
+      const forbidden = this.skillGate.forbidden;
+      const required = this.stepRequiredSkills.size
+        ? loadSkills(this.cwd).filter((s) => this.stepRequiredSkills.has(s.name))
+        : [];
+      const matched = autoMatchSkills(taskText, this.cwd).filter((s) => !forbidden.has(s.name));
+      const byName = new Map<string, SkillDef>();
+      for (const s of [...required, ...matched]) byName.set(s.name, s);
+      const out = [...byName.values()];
+      for (const s of out) {
+        const why = this.stepRequiredSkills.has(s.name) ? "required" : "auto-loaded";
+        this.ui.pushItem({ type: "note", text: `⚡ skill ${why}: ${s.name}` });
       }
-      return matched;
+      return out;
     } catch {
       return [];
     }
@@ -346,7 +446,19 @@ export class GrayskullAgent {
     ].join("\n");
     const memory = this.memory.render();
     const agents = this.agentListing();
-    const skills = this.skillListing();
+    // forbidden skills are dropped from the catalog: no point advertising (and
+    // paying ~60 tok/skill for) something the model is told it can't use
+    const skills = this.skillListing(this.skillGate.forbidden);
+    // explicit use/forbid directives — cover both auto-loaded and required
+    // skills (the bodies are injected by autoSkillBlock above)
+    const loaded = autoSkills.map((s) => s.name);
+    const forbidden = [...this.skillGate.forbidden];
+    const useLine = loaded.length
+      ? `# Skills to use\nUse the following skill${loaded.length > 1 ? "s" : ""} for this task — the full instructions are included above; follow them: ${loaded.join(", ")}.`
+      : "";
+    const forbidLine = forbidden.length
+      ? `# Forbidden skills\nYou are NOT allowed to use the following skill${forbidden.length > 1 ? "s" : ""} under any circumstances — do not call the skill tool for ${forbidden.length > 1 ? "them" : "it"}: ${forbidden.join(", ")}.`
+      : "";
     return {
       role: "system",
       content: [
@@ -359,6 +471,8 @@ export class GrayskullAgent {
           ? `# Available skills\nIf the request involves a topic listed below, you MUST call the skill tool with that skill's name BEFORE writing any code or answer — treat your own memory of these libraries as outdated. Then follow the returned instructions.\n${skills}`
           : "",
         autoSkillBlock(autoSkills),
+        useLine,
+        forbidLine,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -399,6 +513,7 @@ export class GrayskullAgent {
 
   async runTurn(userText: string, images: string[] = []): Promise<string> {
     this.abort = new AbortController();
+    this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, "thinking");
 
@@ -458,6 +573,7 @@ export class GrayskullAgent {
       finalText = await this.runWiredLoop(messages, signal, turnLog);
     } catch (err) {
       if (!signal.aborted) {
+        this.lastError = (err as Error).message;
         this.ui.pushItem({ type: "note", text: `error: ${(err as Error).message}` });
       }
     } finally {
@@ -484,6 +600,7 @@ export class GrayskullAgent {
    */
   async runIsolated(directive: string): Promise<string> {
     this.abort = new AbortController();
+    this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, "chain step");
     const messages: ChatMessage[] = [
@@ -494,6 +611,7 @@ export class GrayskullAgent {
       return await this.runWiredLoop(messages, signal, []);
     } catch (err) {
       if (!signal.aborted) {
+        this.lastError = (err as Error).message;
         this.ui.pushItem({ type: "note", text: `error: ${(err as Error).message}` });
       }
       return "";
@@ -524,7 +642,7 @@ export class GrayskullAgent {
     return runToolLoop({
       client: this.client,
       registry: this.registry,
-      schemas: this.registry.schemas(),
+      schemas: this.registry.schemas(this.toolFilter()),
       leakDialect: this.leakDialect,
       maybeCompact: (m) => this.compactInLoop(m),
       drainInjections: () => {

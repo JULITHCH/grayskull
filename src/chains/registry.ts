@@ -7,6 +7,32 @@ import { modelProfile, type ModelFamily, type InferenceProfile } from "../llm/pr
 export type ChainContextMode = "shared" | "fresh";
 export type StepPreset = "codegen" | "reason";
 
+/** Per-step overrides from the frontmatter `steps:` block. Every field optional;
+ *  unset falls back to the resolved preset / regex gate detection. */
+export interface StepConfig {
+  /** named preset in settings.models — switch the model for this step */
+  model?: string;
+  /** think=on|off — overrides the preset's thinking flag */
+  enableThinking?: boolean;
+  /** temp= — overrides the preset's temperature */
+  temperature?: number;
+  /** gate=true|false — overrides the review/test/verify regex detection */
+  gate?: boolean;
+  /** require=a|b — skills force-loaded into this step's context */
+  requiredSkills?: string[];
+  /** forbid=a|b — skills blocked from auto-load and the skill tool this step */
+  forbiddenSkills?: string[];
+  /** mcp=on|off — MCP tools for this step. undefined inherits the global default
+   *  (all on); false disables them; true enables (all, or the mcpTools subset). */
+  mcpEnabled?: boolean;
+  /** mcptools=a|b — when mcpEnabled, restrict to these MCP tool names (empty = all) */
+  mcpTools?: string[];
+  /** subagents=on|off — sub-agent tools (spawn_agent/create_agent) for this step.
+   *  undefined inherits the default (available); true enables + nudges fan-out;
+   *  false removes the tools so the step can't spawn sub-agents. */
+  subagentsEnabled?: boolean;
+}
+
 export interface ChainDef {
   name: string;
   description: string;
@@ -14,6 +40,8 @@ export interface ChainDef {
   context: ChainContextMode;
   /** per-step preset overrides, keyed by lowercased step text or its first word */
   profiles?: Record<string, StepPreset>;
+  /** per-step model/thinking/temp/gate overrides, keyed lowercased step text or first word */
+  stepConfigs?: Record<string, StepConfig>;
   filePath: string;
 }
 
@@ -39,8 +67,18 @@ function parseChainFile(path: string): ChainDef | null {
   const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const meta: Record<string, string> = {};
   const body = m ? m[2]! : raw;
+  let stepConfigs: Record<string, StepConfig> | undefined;
   if (m) {
-    for (const line of m[1]!.split("\n")) {
+    const lines = m[1]!.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      // `steps:` introduces an indented block of per-step config rows
+      if (/^steps:\s*$/.test(line)) {
+        const block: string[] = [];
+        while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]!)) block.push(lines[++i]!);
+        stepConfigs = parseStepsBlock(block);
+        continue;
+      }
       const kv = line.match(/^(\w+):\s*(.*)$/);
       if (kv) meta[kv[1]!] = kv[2]!.trim();
     }
@@ -53,8 +91,88 @@ function parseChainFile(path: string): ChainDef | null {
     steps,
     context: meta["context"] === "fresh" ? "fresh" : "shared",
     profiles: parseProfilesMeta(meta["profiles"]),
+    stepConfigs,
     filePath: path,
   };
+}
+
+const TRUE_RE = /^(on|true|yes|1)$/i;
+const FALSE_RE = /^(off|false|no|0)$/i;
+
+/** Parse one `k=v`/`k:v ...` config string into a StepConfig. */
+function parseStepConfig(raw: string): StepConfig {
+  const cfg: StepConfig = {};
+  for (const part of raw.split(/[\s,]+/)) {
+    const kv = part.match(/^([^=:]+)[=:](.*)$/);
+    if (!kv) continue;
+    const key = kv[1]!.toLowerCase().trim();
+    const val = kv[2]!.trim();
+    if (!val) continue;
+    switch (key) {
+      case "model":
+        cfg.model = val;
+        break;
+      case "think":
+      case "thinking":
+        if (TRUE_RE.test(val)) cfg.enableThinking = true;
+        else if (FALSE_RE.test(val)) cfg.enableThinking = false;
+        break;
+      case "temp":
+      case "temperature": {
+        const n = Number(val);
+        if (Number.isFinite(n)) cfg.temperature = n;
+        break;
+      }
+      case "gate":
+        if (TRUE_RE.test(val)) cfg.gate = true;
+        else if (FALSE_RE.test(val)) cfg.gate = false;
+        break;
+      case "require":
+      case "requireskills":
+      case "requiredskills": {
+        const list = val.split("|").map((x) => x.trim()).filter(Boolean);
+        if (list.length) cfg.requiredSkills = list;
+        break;
+      }
+      case "forbid":
+      case "forbidskills":
+      case "forbiddenskills": {
+        const list = val.split("|").map((x) => x.trim()).filter(Boolean);
+        if (list.length) cfg.forbiddenSkills = list;
+        break;
+      }
+      case "mcp":
+        if (TRUE_RE.test(val)) cfg.mcpEnabled = true;
+        else if (FALSE_RE.test(val)) cfg.mcpEnabled = false;
+        break;
+      case "mcptools":
+      case "mcptool": {
+        const list = val.split("|").map((x) => x.trim()).filter(Boolean);
+        if (list.length) cfg.mcpTools = list;
+        break;
+      }
+      case "subagents":
+      case "subagent":
+      case "agents":
+        if (TRUE_RE.test(val)) cfg.subagentsEnabled = true;
+        else if (FALSE_RE.test(val)) cfg.subagentsEnabled = false;
+        break;
+    }
+  }
+  return cfg;
+}
+
+/** `  research: model=qwen35 think=on temp=0.6` rows → { research: {...} }, keyed lowercased. */
+function parseStepsBlock(lines: string[]): Record<string, StepConfig> | undefined {
+  const out: Record<string, StepConfig> = {};
+  for (const line of lines) {
+    const m = line.match(/^\s+([^:]+?):\s*(.*)$/);
+    if (!m) continue;
+    const name = m[1]!.toLowerCase().trim();
+    const cfg = parseStepConfig(m[2]!);
+    if (Object.keys(cfg).length) out[name] = cfg;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** `profiles: implement=codegen, plan=reason` → { implement: "codegen", plan: "reason" } */
@@ -89,6 +207,7 @@ export function saveChain(opts: {
   steps: string[];
   context?: ChainContextMode;
   profiles?: Record<string, StepPreset>;
+  stepConfigs?: Record<string, StepConfig>;
 }): string {
   mkdirSync(GLOBAL_CHAINS_DIR, { recursive: true });
   const path = join(GLOBAL_CHAINS_DIR, `${opts.name}.md`);
@@ -101,6 +220,22 @@ export function saveChain(opts: {
   if (opts.profiles && Object.keys(opts.profiles).length) {
     meta.push(`profiles: ${Object.entries(opts.profiles).map(([k, v]) => `${k}=${v}`).join(", ")}`);
   }
+  const rows = Object.entries(opts.stepConfigs ?? {})
+    .map(([name, cfg]) => {
+      const parts: string[] = [];
+      if (cfg.model) parts.push(`model=${cfg.model}`);
+      if (cfg.enableThinking !== undefined) parts.push(`think=${cfg.enableThinking ? "on" : "off"}`);
+      if (cfg.temperature !== undefined) parts.push(`temp=${cfg.temperature}`);
+      if (cfg.gate !== undefined) parts.push(`gate=${cfg.gate ? "true" : "false"}`);
+      if (cfg.requiredSkills?.length) parts.push(`require=${cfg.requiredSkills.join("|")}`);
+      if (cfg.forbiddenSkills?.length) parts.push(`forbid=${cfg.forbiddenSkills.join("|")}`);
+      if (cfg.mcpEnabled !== undefined) parts.push(`mcp=${cfg.mcpEnabled ? "on" : "off"}`);
+      if (cfg.mcpTools?.length) parts.push(`mcptools=${cfg.mcpTools.join("|")}`);
+      if (cfg.subagentsEnabled !== undefined) parts.push(`subagents=${cfg.subagentsEnabled ? "on" : "off"}`);
+      return parts.length ? `  ${name}: ${parts.join(" ")}` : "";
+    })
+    .filter(Boolean);
+  if (rows.length) meta.push("steps:", ...rows);
   const content = [...meta, "---", "", opts.steps.join("\n-> "), ""].join("\n");
   writeFileSync(path, content);
   return path;
@@ -143,6 +278,23 @@ export const GATE_RE = /\breview\b|\btest(ing)?\b|\bverify\b/i;
 
 export function isGate(step: string): boolean {
   return GATE_RE.test(step);
+}
+
+/** Look up a step's per-step config (full text, then first word). */
+export function resolveStepConfig(
+  step: string,
+  chain?: Pick<ChainDef, "stepConfigs">,
+): StepConfig | undefined {
+  const cfgs = chain?.stepConfigs;
+  if (!cfgs) return undefined;
+  const key = step.toLowerCase().trim();
+  return cfgs[key] ?? cfgs[key.split(/\s/)[0]!];
+}
+
+/** Gate detection honouring a per-step `gate=` override, else the regex. */
+export function stepGate(step: string, chain?: Pick<ChainDef, "stepConfigs">): boolean {
+  const g = resolveStepConfig(step, chain)?.gate;
+  return g ?? GATE_RE.test(step);
 }
 
 const GATE_SUFFIX = `\nThis step is a quality gate. End your response with exactly one line:\nVERDICT: PASS\nor\nVERDICT: FAIL: <short list of concrete problems>\nFail only on real problems that must be fixed, not on taste.`;
@@ -229,8 +381,10 @@ export function resolveStepProfile(
   return modelProfile(family).presets[preset];
 }
 
-/** Built-in name → tuned instruction; freeform text used verbatim + modifiers. */
-export function expandStep(step: string): string {
+/** Built-in name → tuned instruction; freeform text used verbatim + modifiers.
+ *  `forceGate` overrides the regex gate detection (chain-aware `gate=` config);
+ *  undefined keeps the regex behavior for non-chain callers. */
+export function expandStep(step: string, forceGate?: boolean): string {
   const key = step.toLowerCase().trim();
   let text = BUILTIN_STEPS[key];
   if (!text) {
@@ -238,6 +392,6 @@ export function expandStep(step: string): string {
     if (/\bweb\s*search\b|\bwebsearch\b/i.test(step)) text += WEBSEARCH_ADDENDUM;
     if (key.startsWith("review")) text = `${BUILTIN_STEPS["review"]}\n${text}`;
   }
-  if (isGate(step)) text += GATE_SUFFIX;
+  if (forceGate ?? isGate(step)) text += GATE_SUFFIX;
   return text;
 }

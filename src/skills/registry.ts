@@ -111,8 +111,9 @@ export function loadSkills(cwd: string): SkillDef[] {
   return [...byName.values()];
 }
 
-export function skillListing(cwd: string): string {
-  const skills = loadSkills(cwd);
+export function skillListing(cwd: string, exclude?: Set<string>): string {
+  let skills = loadSkills(cwd);
+  if (exclude && exclude.size) skills = skills.filter((s) => !exclude.has(s.name));
   if (skills.length === 0) return "";
   // official skill packs ship very long descriptions — cap them so 25+ skills
   // don't eat the context window every turn (the body loads on invocation)

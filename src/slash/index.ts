@@ -25,6 +25,7 @@ import {
   deleteChain,
   parseChainBody,
   isGate,
+  stepGate,
   BUILTIN_STEPS,
   type ChainDef,
   type ChainContextMode,
@@ -396,7 +397,7 @@ async function runThinkingChain(ctx: CommandContext, args: string): Promise<Comm
     const chains = loadChains();
     if (chains.length === 0) return note(ctx, "no chains. Create one: /tc new <name> step1 -> step2 -> …");
     const lines = chains.map((c) => {
-      const steps = c.steps.map((s) => (isGate(s) ? `⛩${s}` : s)).join(" → ");
+      const steps = c.steps.map((s) => (stepGate(s, c) ? `⛩${s}` : s)).join(" → ");
       return `${c.name} [${c.context}]${c.description ? ` — ${c.description}` : ""}\n  ${steps}`;
     });
     const sticky = chainState.sticky

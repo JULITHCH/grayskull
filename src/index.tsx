@@ -45,7 +45,8 @@ registerAgentTools({
   leakDialect: () => modelProfile(settings.modelFamily).leakDialect,
   monitor: (ev) => link.publish({ t: "agent", ev }),
 });
-registry.register(skillTool(cwd));
+const skillGate = { forbidden: new Set<string>() };
+registry.register(skillTool(cwd, skillGate));
 
 const perms = new PermissionEngine(settings);
 const memory = new MemoryManager(cwd, settings, client);
@@ -65,7 +66,8 @@ const bridge: UiBridge = {
 
 const agent = new GrayskullAgent({ cwd, settings, client, registry, perms, memory, ui: bridge });
 agent.agentListing = () => agentListing(cwd);
-agent.skillListing = () => skillListing(cwd);
+agent.skillListing = (exclude) => skillListing(cwd, exclude);
+agent.skillGate = skillGate;
 
 // connect MCP in the background; searxng is on by default
 void mcp.connectAll(settings);

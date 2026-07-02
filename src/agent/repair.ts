@@ -15,6 +15,34 @@ export type ValidationResult =
   | { ok: true; args: Record<string, unknown> }
   | { ok: false; error: string };
 
+/** Common argument-name aliases models reach for out of Claude-Code / other
+ *  habits (grayskull's file tools use `path`, not `file_path`). Remapped only
+ *  when the canonical key is absent and validation already failed, so valid
+ *  calls are never touched. */
+const ARG_ALIASES: Record<string, string> = {
+  file_path: "path",
+  filepath: "path",
+  filename: "path",
+  old_str: "old_string",
+  oldText: "old_string",
+  new_str: "new_string",
+  newText: "new_string",
+  contents: "content",
+};
+
+function applyArgAliases(obj: Record<string, unknown>): Record<string, unknown> | null {
+  let changed = false;
+  const out = { ...obj };
+  for (const [alias, canon] of Object.entries(ARG_ALIASES)) {
+    if (alias in out && !(canon in out)) {
+      out[canon] = out[alias];
+      delete out[alias];
+      changed = true;
+    }
+  }
+  return changed ? out : null;
+}
+
 export function validateCall(tool: ToolDef, rawArgs: string): ValidationResult {
   let parsed: unknown;
   try {
@@ -29,8 +57,16 @@ export function validateCall(tool: ToolDef, rawArgs: string): ValidationResult {
     return { ok: false, error: `Arguments for ${tool.name} must be a JSON object.` };
   }
   if (!tool.schema) return { ok: true, args: parsed as Record<string, unknown> };
-  const result = tool.schema.safeParse(parsed);
+  const obj = parsed as Record<string, unknown>;
+  const result = tool.schema.safeParse(obj);
   if (result.success) return { ok: true, args: result.data as Record<string, unknown> };
+  // a common failure is the model using a synonym key (file_path → path); retry
+  // once with aliases remapped before bothering the model with an error
+  const aliased = applyArgAliases(obj);
+  if (aliased) {
+    const retry = tool.schema.safeParse(aliased);
+    if (retry.success) return { ok: true, args: retry.data as Record<string, unknown> };
+  }
   const issues = (result.error as ZodError).issues
     .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
     .join("\n");

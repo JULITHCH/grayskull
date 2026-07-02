@@ -17,12 +17,18 @@ import { skillListing } from "../skills/registry";
 import { makeTodoTool, type TodoItem } from "../tools/todo";
 import { memoryGraphData } from "../memory/scores";
 import { runChain, chainState } from "../chains/runner";
-import type { ChainDef, ChainContextMode } from "../chains/registry";
+import { loadChains, saveChain, BUILTIN_STEPS } from "../chains/registry";
+import { loadSkills } from "../skills/registry";
+import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
 import { modelProfile } from "../llm/profiles";
 
-/** slash commands that open $EDITOR or fzf — they would hang the server */
-const TERMINAL_ONLY = /^\/(system|settings|resume)\b|^\/(memory|agents|thinkingchain|tc)\s+edit\b/;
+/** slash commands that open $EDITOR or fzf — they would hang the server.
+ *  `/tc edit` is NOT here: in the browser it opens the clickable chain editor. */
+const TERMINAL_ONLY = /^\/(system|settings|resume)\b|^\/(memory|agents)\s+edit\b/;
+
+/** `/tc edit [name]` / `/thinkingchain edit [name]` → browser chain editor */
+const CHAIN_EDIT_RE = /^\/(?:tc|thinkingchain)\s+edit\b\s*(.*)$/;
 
 export type Broadcast = (msg: Record<string, unknown>) => void;
 
@@ -65,7 +71,8 @@ export class WebSession {
     const todo = makeTodoTool();
     this.todoState = todo.state;
     registry.register(todo.tool);
-    registry.register(skillTool(cwd));
+    const skillGate = { forbidden: new Set<string>() };
+    registry.register(skillTool(cwd, skillGate));
     registerAgentTools({
       cwd,
       client: this.client,
@@ -135,7 +142,8 @@ export class WebSession {
       ui: bridge,
     });
     this.agent.agentListing = () => agentListing(cwd);
-    this.agent.skillListing = () => skillListing(cwd);
+    this.agent.skillListing = (exclude) => skillListing(cwd, exclude);
+    this.agent.skillGate = skillGate;
 
     void this.mcp.connectAll(this.settings);
   }
@@ -199,6 +207,11 @@ export class WebSession {
 
   private async handleSlash(text: string): Promise<void> {
     const note = (t: string) => this.bridge.pushItem({ type: "note", text: t });
+    const chainEdit = text.match(CHAIN_EDIT_RE);
+    if (chainEdit) {
+      this.openChainEditor(chainEdit[1]!.trim());
+      return;
+    }
     if (TERMINAL_ONLY.test(text)) {
       note(`${text.split(" ")[0]} opens an editor/picker — run it in the terminal session`);
       return;
@@ -308,6 +321,63 @@ export class WebSession {
 
   interrupt(): void {
     this.agent.stop();
+  }
+
+  /** Open the browser chain editor for `name` (blank → create a new chain). */
+  private openChainEditor(name: string): void {
+    const note = (t: string) => this.bridge.pushItem({ type: "note", text: t });
+    let def: Pick<ChainDef, "name" | "description" | "context" | "steps" | "stepConfigs">;
+    if (name) {
+      const found = loadChains().find((c) => c.name === name);
+      if (!found) {
+        note(`no chain named "${name}" — /tc lists chains`);
+        return;
+      }
+      def = {
+        name: found.name,
+        description: found.description,
+        context: found.context,
+        steps: found.steps,
+        stepConfigs: found.stepConfigs ?? {},
+      };
+    } else {
+      def = { name: "", description: "", context: "shared", steps: [], stepConfigs: {} };
+    }
+    this.send({
+      t: "chain_edit",
+      def,
+      models: Object.keys(this.settings.models),
+      builtins: Object.keys(BUILTIN_STEPS),
+      skills: loadSkills(this.cwd).map((s) => s.name),
+      mcpTools: this.agent.mcpToolNames(),
+    });
+  }
+
+  /** Persist a chain edited in the browser editor. */
+  chainSave(raw: Record<string, unknown>): void {
+    const note = (t: string) => this.bridge.pushItem({ type: "note", text: t });
+    try {
+      const name = String(raw["name"] ?? "").trim();
+      const steps = (Array.isArray(raw["steps"]) ? raw["steps"] : [])
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      if (!name) return this.send({ t: "chain_error", message: "chain needs a name" });
+      if (!steps.length) return this.send({ t: "chain_error", message: "chain needs at least one step" });
+      const ctxMode: ChainContextMode = raw["context"] === "fresh" ? "fresh" : "shared";
+      const stepConfigs = raw["stepConfigs"] as Record<string, StepConfig> | undefined;
+      const path = saveChain({
+        name,
+        description: String(raw["description"] ?? ""),
+        context: ctxMode,
+        steps,
+        stepConfigs:
+          stepConfigs && Object.keys(stepConfigs).length ? stepConfigs : undefined,
+      });
+      this.send({ t: "chain_saved", name });
+      note(`⛓ saved chain "${name}" → ${path}`);
+    } catch (err) {
+      this.send({ t: "chain_error", message: (err as Error).message });
+    }
   }
 }
 

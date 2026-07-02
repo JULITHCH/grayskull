@@ -35,6 +35,8 @@ const ModelPresetSchema = z.object({
   model: z.string(),
   apiKeyEnv: z.string().optional(),
   contextWindow: z.number().optional(),
+  /** cap on output tokens — must be < the server's max_model_len for small models */
+  maxTokens: z.number().optional(),
   temperature: z.number().optional(),
   topP: z.number().optional(),
   topK: z.number().optional(),
@@ -44,11 +46,11 @@ const ModelPresetSchema = z.object({
 export type ModelPreset = z.infer<typeof ModelPresetSchema>;
 
 export const SettingsSchema = z.object({
-  // defaults to Qwen3.6-35B-A3B NVFP4 on 10.8.0.22:8003 (reuses the qwen3.5 model
+  // defaults to Qwen3.6-35B-A3B NVFP4 on 10.8.0.22:8000 (reuses the qwen3.5 model
   // profile); /model qwen36 / qwen35 / glm switch the whole stack live.
-  baseURL: z.string().default("http://10.8.0.22:8003/v1"),
+  baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
-  model: z.string().default("qwen3.6-35b-a3b-nvfp4"),
+  model: z.string().default("nvidia/Qwen3.6-35B-A3B-NVFP4"),
   /** model family — selects leak-recovery dialect + chain-step sampling presets. */
   modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
   contextWindow: z.number().default(262144),
@@ -78,14 +80,14 @@ export const SettingsSchema = z.object({
         topK: 20,
       },
       "qwen36-nvfp4": {
-        // Qwen3.6-35B-A3B NVFP4 (DGX Spark build) on :8003 — the preferred,
+        // Qwen3.6-35B-A3B NVFP4 (DGX Spark build) on :8000 — the preferred,
         // faster (~120 tok/s) Qwen3.6 build; reuses the qwen3.5 profile.
         // MTP spec-decoding is transparent; reasoning_content stays empty on
         // this vLLM build (the answer is in content). Launch:
         // ~/work/start-model.sh qwen36-nvfp4
         family: "qwen3.5",
-        baseURL: "http://10.8.0.22:8003/v1",
-        model: "qwen3.6-35b-a3b-nvfp4",
+        baseURL: "http://10.8.0.22:8000/v1",
+        model: "nvidia/Qwen3.6-35B-A3B-NVFP4",
         contextWindow: 262144,
         temperature: 0.7,
         topP: 0.8,
@@ -110,6 +112,30 @@ export const SettingsSchema = z.object({
         temperature: 0.6,
         topP: 0.95,
         topK: 40,
+      },
+      "llama-8b": {
+        // Llama-3.1-8B-Instruct NVFP4 on :8001 — tiny model, fast but limited.
+        // Good for quick tasks where the bigger models are busy.
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8001/v1",
+        model: "nvidia/Llama-3.1-8B-Instruct-NVFP4",
+        contextWindow: 131072,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+      },
+      "nemotron-9b": {
+        // NVIDIA Nemotron-Nano-9B-v2 NVFP4 on :8002 — ultra-small, very fast.
+        // Use for simple tasks or when speed matters more than quality.
+        // Served at max_model_len=8192, so cap maxTokens below that.
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8002/v1",
+        model: "nvidia/NVIDIA-Nemotron-Nano-9B-v2-NVFP4",
+        contextWindow: 8192,
+        maxTokens: 4096,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
       },
     }),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),

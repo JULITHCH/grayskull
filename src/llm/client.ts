@@ -173,6 +173,23 @@ export class LlmClient {
   ): Promise<CompletionResult> {
     const s = this.settings;
     const samp = this.sampling();
+    // clamp output tokens so prompt + output fits the model's context window —
+    // small-context models (e.g. nemotron @ 8192) 400 otherwise. Tool schemas
+    // count toward the prompt too, and the estimate runs low on dense code, so
+    // fudge up 20% + a fixed margin before subtracting from the window.
+    let estTools = 0;
+    for (const t of tools) estTools += estimateTokens(t.name + t.description + JSON.stringify(t.parameters));
+    const estPrompt = Math.ceil((estimateMessagesTokens(messages) + estTools) * 1.2) + 384;
+    const MIN_OUTPUT = 256;
+    const room = s.contextWindow - estPrompt;
+    if (room < MIN_OUTPUT) {
+      // no point sending a doomed request — fail with an actionable message
+      throw new Error(
+        `prompt (~${estPrompt} tokens incl. tool schemas) leaves no room for output in ` +
+          `${s.model}'s ${s.contextWindow}-token context — switch this step to a larger-context model`,
+      );
+    }
+    const maxOut = Math.min(s.maxTokens, room);
     const stream = await this.client.chat.completions.create(
       {
         model: s.model,
@@ -181,7 +198,7 @@ export class LlmClient {
         stream_options: { include_usage: true },
         temperature: samp.temperature,
         top_p: samp.topP,
-        max_tokens: s.maxTokens,
+        max_tokens: maxOut,
         ...(tools.length > 0
           ? {
               tools: tools.map((t) => ({

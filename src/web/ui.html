@@ -113,6 +113,7 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 #memLegend { position: absolute; bottom: 4px; left: 8px; font-size: 9px; color: var(--g-dim); pointer-events: none; }
 #ops { overflow-y: auto; }
 #opsBody { padding: 8px 10px; flex: 1; overflow-y: auto; font-size: 11px; }
+.chainModel { color: var(--amber, #ffb000); border: 1px solid var(--g-faint); padding: 0 5px; font-size: 10px; }
 .chainPipe { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 8px; }
 .cstep { border: 1px solid var(--g-faint); padding: 2px 7px; color: var(--g-dim); font-size: 10px; }
 .cstep.done { color: var(--g); border-color: var(--g-dim); opacity: .6; }
@@ -151,6 +152,32 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
 .modal .actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--g-faint); }
 .modal input { flex: 1; background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim);
   padding: 6px 8px; font-family: inherit; outline: none; }
+/* ── chain editor ── */
+.cseHdr { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.cseHdr input, .cseHdr select, .cseRow input, .cseRow select {
+  background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim);
+  padding: 4px 6px; font-family: inherit; font-size: 11px; outline: none; }
+.cseLegend { color: var(--g-dim); font-size: 10px; margin-bottom: 6px; letter-spacing: .5px; }
+.cseRow { display: flex; gap: 4px; align-items: center; margin-bottom: 5px; }
+.cseRow .step { flex: 1; min-width: 80px; }
+.cseRow .temp { flex: 0 0 58px; width: 58px; }
+.cseRow .mini { background: rgba(0,0,0,.4); color: var(--g); border: 1px solid var(--g-dim);
+  cursor: pointer; padding: 3px 7px; font-family: inherit; }
+.cseRow .mini:hover { border-color: var(--g); }
+.cseCard { border: 1px solid var(--g-faint); padding: 6px; margin-bottom: 7px; }
+.cseSkills { display: flex; gap: 12px; margin-top: 5px; }
+.cseSkills label { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--g-dim); font-size: 10px; }
+.cseSkLbl { display: flex; align-items: center; gap: 5px; }
+.cseClr { color: var(--red); cursor: pointer; text-decoration: underline; }
+.cseHint { color: var(--g-faint); margin-left: auto; }
+.cseMcp { display: flex; gap: 12px; margin-top: 6px; align-items: flex-start; }
+.cseChk { display: flex; align-items: center; gap: 5px; color: var(--g); font-size: 11px; white-space: nowrap; }
+.cseMcpOnly { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--g-dim); font-size: 10px; }
+.cseMcpOnly select[multiple] { background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim); font-family: inherit; font-size: 11px; outline: none; }
+.cseMcpOnly option:checked { background: var(--g-faint); color: var(--g); }
+.cseSkills select[multiple] { background: rgba(0,0,0,.5); color: var(--g); border: 1px solid var(--g-dim);
+  font-family: inherit; font-size: 11px; outline: none; }
+.cseSkills option:checked { background: var(--g-faint); color: var(--g); }
 #toast { position: fixed; bottom: 16px; right: 16px; z-index: 200; color: var(--red); display: none;
   border: 1px solid var(--red); background: rgba(20,0,4,.9); padding: 8px 14px; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--g-faint); }
@@ -277,6 +304,26 @@ body.kamikazeee .modal { border-color: var(--red); box-shadow: 0 0 40px rgba(255
   </div>
 </div></div>
 
+<div class="modal-bg" id="chainModalBg"><div class="modal" style="width:min(880px,94vw)">
+  <h3 id="cseTitle">⛓ EDIT CHAIN</h3>
+  <div class="body" id="cseBody" style="white-space:normal">
+    <div class="cseHdr">
+      <input id="cseName" placeholder="chain name" style="flex:0 0 170px">
+      <input id="cseDesc" placeholder="description" style="flex:1">
+      <select id="cseContext"><option value="shared">shared ctx</option><option value="fresh">fresh ctx</option></select>
+    </div>
+    <div class="cseLegend">step · model · thinking · temp · gate — blank = inherit default</div>
+    <div id="cseRows"></div>
+    <button class="btn" id="cseAdd" style="margin-top:6px">+ add step</button>
+    <datalist id="cseBuiltins"></datalist>
+  </div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('chainModalBg')">CANCEL</button>
+    <button class="btn" id="cseSaveBtn">SAVE</button>
+  </div>
+</div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -309,6 +356,7 @@ const S = {
   nodes: {},         // sid -> Map(nodeId -> {label, kind, state, log:[]})
   memory: {},        // sid -> {global, local}
   pendingPerm: null, pendingAsk: null,
+  chainEdit: null,   // { models, builtins, name, description, context, rows:[] }
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -346,6 +394,9 @@ function handle(m) {
     case "ask_req": S.pendingAsk = m; showAsk(); break;
     case "perm_done": if (S.pendingPerm?.reqId === m.reqId) { S.pendingPerm = null; closeModal("permModalBg"); } break;
     case "ask_done": if (S.pendingAsk?.reqId === m.reqId) { S.pendingAsk = null; closeModal("askModalBg"); } break;
+    case "chain_edit": if (!m.sid || m.sid === S.current) openChainEditor(m); break;
+    case "chain_saved": closeModal("chainModalBg"); break;
+    case "chain_error": toast(m.message || "chain save failed"); break;
     case "confirm_create":
       if (confirm("Directory doesn't exist:\n" + m.cwd + "\n\nCreate it and start the session?")) {
         send({ t: "new_session", cwd: m.cwd, create: true });
@@ -816,19 +867,146 @@ function answerAsk(v) { const a = S.pendingAsk; if (!a) return; send({ t: "answe
 $("askSend").onclick = () => $("askInput").value.trim() && answerAsk($("askInput").value.trim());
 $("askInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && $("askInput").value.trim()) answerAsk($("askInput").value.trim()); });
 
+/* ── chain editor modal ──────────────────────────────────────── */
+function openChainEditor(m) {
+  const def = m.def || {};
+  const cfgs = def.stepConfigs || {};
+  const lookup = (step) => {
+    const k = String(step).toLowerCase().trim();
+    return cfgs[k] || cfgs[k.split(/\s+/)[0]] || {};
+  };
+  const blankRow = () => ({ step: "", model: "", think: "", temp: "", gate: "", require: [], forbid: [], mcp: true, mcptools: [], subagents: false });
+  const rows = (def.steps || []).map((step) => {
+    const c = lookup(step);
+    return {
+      step,
+      model: c.model || "",
+      think: c.enableThinking === true ? "on" : c.enableThinking === false ? "off" : "",
+      temp: c.temperature === undefined || c.temperature === null ? "" : String(c.temperature),
+      gate: c.gate === true ? "on" : c.gate === false ? "off" : "",
+      require: Array.isArray(c.requiredSkills) ? c.requiredSkills : [],
+      forbid: Array.isArray(c.forbiddenSkills) ? c.forbiddenSkills : [],
+      // undefined (old chains) reflects current all-on behavior → checked
+      mcp: c.mcpEnabled !== false,
+      mcptools: Array.isArray(c.mcpTools) ? c.mcpTools : [],
+      subagents: c.subagentsEnabled !== false,
+    };
+  });
+  if (!rows.length) rows.push(blankRow());
+  S.chainEdit = {
+    models: m.models || [], builtins: m.builtins || [], skills: m.skills || [], mcpTools: m.mcpTools || [],
+    name: def.name || "", description: def.description || "",
+    context: def.context === "fresh" ? "fresh" : "shared", rows, blankRow,
+  };
+  $("cseBuiltins").innerHTML = (m.builtins || []).map((b) => `<option value="${esc(b)}">`).join("");
+  $("cseTitle").textContent = def.name ? `⛓ EDIT CHAIN: ${def.name}` : "⛓ NEW CHAIN";
+  $("cseName").value = S.chainEdit.name;
+  $("cseDesc").value = S.chainEdit.description;
+  $("cseContext").value = S.chainEdit.context;
+  renderChainRows();
+  $("chainModalBg").classList.add("open");
+}
+function cseModelOpts(sel) {
+  const opts = ['<option value="">— session model —</option>'];
+  for (const name of (S.chainEdit?.models || [])) opts.push(`<option value="${esc(name)}"${name === sel ? " selected" : ""}>${esc(name)}</option>`);
+  return opts.join("");
+}
+function cseTriOpts(labels, sel) {
+  return labels.map(([v, t]) => `<option value="${v}"${v === sel ? " selected" : ""}>${t}</option>`).join("");
+}
+function cseSkillOpts(selArr) {
+  const sel = new Set(selArr || []);
+  return (S.chainEdit?.skills || []).map((n) => `<option value="${esc(n)}"${sel.has(n) ? " selected" : ""}>${esc(n)}</option>`).join("");
+}
+function cseMcpOpts(selArr) {
+  const sel = new Set(selArr || []);
+  return (S.chainEdit?.mcpTools || []).map((n) => {
+    const label = n.replace(/^mcp__/, "").replace(/__/g, ":");
+    return `<option value="${esc(n)}"${sel.has(n) ? " selected" : ""}>${esc(label)}</option>`;
+  }).join("");
+}
+function renderChainRows() {
+  const ce = S.chainEdit; if (!ce) return;
+  const noSkills = !(ce.skills && ce.skills.length);
+  const noMcp = !(ce.mcpTools && ce.mcpTools.length);
+  $("cseRows").innerHTML = ce.rows.map((r, i) => `
+    <div class="cseCard">
+      <div class="cseRow">
+        <input class="step" list="cseBuiltins" data-i="${i}" data-f="step" value="${esc(r.step)}" placeholder="step">
+        <select data-i="${i}" data-f="model" title="model">${cseModelOpts(r.model)}</select>
+        <select data-i="${i}" data-f="think" title="thinking">${cseTriOpts([["", "think:auto"], ["on", "think:on"], ["off", "think:off"]], r.think)}</select>
+        <input class="temp" type="number" step="0.05" min="0" max="2" data-i="${i}" data-f="temp" value="${esc(r.temp)}" placeholder="temp" title="temperature">
+        <select data-i="${i}" data-f="gate" title="gate">${cseTriOpts([["", "gate:auto"], ["on", "gate:on"], ["off", "gate:off"]], r.gate)}</select>
+        <button class="mini" onclick="cseMove(${i},-1)" title="move up">↑</button>
+        <button class="mini" onclick="cseMove(${i},1)" title="move down">↓</button>
+        <button class="mini" onclick="cseDel(${i})" title="remove">✕</button>
+      </div>
+      <div class="cseSkills"${noSkills ? ' style="display:none"' : ""}>
+        <label><span class="cseSkLbl">require (${r.require.length})${r.require.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'require')">clear</a>` : ""}<span class="cseHint"> — empty = auto-load</span></span><select multiple size="3" data-i="${i}" data-f="require" title="skills force-loaded for this step; leave empty to auto-load relevant ones">${cseSkillOpts(r.require)}</select></label>
+        <label><span class="cseSkLbl">forbid (${r.forbid.length})${r.forbid.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'forbid')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="forbid" title="skills blocked from auto-load and the skill tool this step">${cseSkillOpts(r.forbid)}</select></label>
+      </div>
+      <div class="cseMcp">
+        <label class="cseChk"><input type="checkbox" data-i="${i}" data-f="subagents" ${r.subagents ? "checked" : ""}> sub-agents</label>
+        <label class="cseChk"><input type="checkbox" data-i="${i}" data-f="mcp" ${r.mcp ? "checked" : ""}> MCP tools</label>
+        ${noMcp ? "" : `<label class="cseMcpOnly"><span class="cseSkLbl">only (${r.mcptools.length}, empty = all)${r.mcptools.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'mcptools')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="mcptools" title="restrict this step to these MCP tools (requires the checkbox on)">${cseMcpOpts(r.mcptools)}</select></label>`}
+      </div>
+    </div>`).join("");
+}
+function cseSync() {
+  const ce = S.chainEdit; if (!ce) return;
+  ce.name = $("cseName").value; ce.description = $("cseDesc").value; ce.context = $("cseContext").value;
+  $("cseRows").querySelectorAll("[data-i]").forEach((el) => {
+    const r = ce.rows[+el.dataset.i]; if (!r) return;
+    if (el.type === "checkbox") r[el.dataset.f] = el.checked;
+    else if (el.multiple) r[el.dataset.f] = [...el.selectedOptions].map((o) => o.value);
+    else r[el.dataset.f] = el.value;
+  });
+}
+function cseClearSkills(i, field) { cseSync(); if (S.chainEdit.rows[i]) S.chainEdit.rows[i][field] = []; renderChainRows(); }
+function cseAdd() { cseSync(); S.chainEdit.rows.push(S.chainEdit.blankRow()); renderChainRows(); }
+function cseDel(i) { cseSync(); S.chainEdit.rows.splice(i, 1); if (!S.chainEdit.rows.length) S.chainEdit.rows.push(S.chainEdit.blankRow()); renderChainRows(); }
+function cseMove(i, d) { cseSync(); const r = S.chainEdit.rows, j = i + d; if (j < 0 || j >= r.length) return; [r[i], r[j]] = [r[j], r[i]]; renderChainRows(); }
+function cseSave() {
+  cseSync(); const ce = S.chainEdit; if (!ce) return;
+  const steps = [], stepConfigs = {};
+  for (const r of ce.rows) {
+    const step = r.step.trim(); if (!step) continue;
+    steps.push(step);
+    const c = {};
+    if (r.model) c.model = r.model;
+    if (r.think === "on") c.enableThinking = true; else if (r.think === "off") c.enableThinking = false;
+    if (r.temp !== "" && isFinite(+r.temp)) c.temperature = +r.temp;
+    if (r.gate === "on") c.gate = true; else if (r.gate === "off") c.gate = false;
+    if (r.require && r.require.length) c.requiredSkills = r.require;
+    if (r.forbid && r.forbid.length) c.forbiddenSkills = r.forbid;
+    c.mcpEnabled = !!r.mcp;
+    if (r.mcp && r.mcptools && r.mcptools.length) c.mcpTools = r.mcptools;
+    c.subagentsEnabled = !!r.subagents;
+    if (Object.keys(c).length) stepConfigs[step.toLowerCase()] = c;
+  }
+  if (!ce.name.trim()) return toast("chain needs a name");
+  if (!steps.length) return toast("chain needs at least one step");
+  send({ t: "chain_save", sid: S.current, def: { name: ce.name.trim(), description: ce.description, context: ce.context, steps, stepConfigs } });
+}
+$("cseAdd").onclick = cseAdd;
+$("cseSaveBtn").onclick = cseSave;
+
 /* ── chain pipeline + todo panel ─────────────────────────────── */
 function renderOps() {
   const st = S.status[S.current] ?? {};
   let html = "";
   const chain = st.chain;
   if (chain) {
-    html += `<div style="color:var(--g);margin-bottom:4px">⛓ ${esc(chain.name)} <span style="color:var(--g-dim)">[${chain.mode}] step ${chain.step}/${chain.total}</span></div><div class="chainPipe">`;
+    html += `<div style="color:var(--g);margin-bottom:4px">⛓ ${esc(chain.name)} <span style="color:var(--g-dim)">[${chain.mode}] step ${chain.step}/${chain.total}</span>`;
+    if (chain.model) html += ` <span class="chainModel" title="model running this step">▶ ${esc(chain.model)}</span>`;
+    html += `</div><div class="chainPipe">`;
     chain.steps.forEach((s, i) => {
       const cls = ["cstep"];
       if (chain.gates[i]) cls.push("gate");
       if (i + 1 < chain.step) cls.push("done");
       if (i + 1 === chain.step) cls.push("active", chain.retrying ? "retry" : "");
-      html += `<span class="${cls.join(" ")}" title="${chain.gates[i] ? "review gate" : ""}">${chain.gates[i] ? "⛩ " : ""}${esc(s)}</span>`;
+      const onModel = i + 1 === chain.step && chain.model ? ` — ${chain.model}` : "";
+      html += `<span class="${cls.join(" ")}" title="${chain.gates[i] ? "review gate" : ""}${onModel}">${chain.gates[i] ? "⛩ " : ""}${esc(s)}</span>`;
       if (i < chain.steps.length - 1) html += `<span class="carrow">→</span>`;
     });
     html += `</div>`;

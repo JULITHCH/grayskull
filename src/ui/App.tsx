@@ -594,7 +594,7 @@ export function App(props: AppProps): React.ReactElement {
   const todoOpen = todoState.items.filter((i) => !i.done).length;
   const streamTail = streamText.split("\n").slice(-STREAM_TAIL_LINES).join("\n");
   const chainChip = chainState.running
-    ? `⛓ ${chainState.running.name} ${chainState.running.step}/${chainState.running.total}`
+    ? `⛓ ${chainState.running.name} ${chainState.running.step}/${chainState.running.total}${chainState.running.model ? ` ▶ ${chainState.running.model}` : ""}`
     : chainState.sticky
       ? `⛓ ${chainState.sticky.def.name} [${chainState.sticky.mode}]`
       : "";
