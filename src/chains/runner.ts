@@ -88,9 +88,11 @@ export async function runChain(opts: {
     color: "magenta",
   });
 
-  // per-step model switching: remember the session model and restore it after
+  // per-step model switching: remember the session model and restore it after.
+  // tracked by preset NAME (null = session model) so a preset that shares the
+  // session's endpoint but differs in sampling still gets applied + restored.
   const baseModel = agent.snapshotModelPreset();
-  let activeModel = baseModel;
+  let activePreset: string | null = null;
   const gates = chain.steps.map((s) => stepGate(s, chain));
 
   let i = 0;
@@ -100,12 +102,11 @@ export async function runChain(opts: {
       const cfg = resolveStepConfig(step, chain);
 
       // resolve + apply the step's model (named preset), else stay on base
-      let target = baseModel;
+      let wantPreset: string | null = null;
       let modelLabel = baseModel.model;
       if (cfg?.model) {
-        const preset = agent.lookupModelPreset(cfg.model);
-        if (preset) {
-          target = preset;
+        if (agent.lookupModelPreset(cfg.model)) {
+          wantPreset = cfg.model;
           modelLabel = cfg.model;
         } else {
           ui.pushItem({
@@ -114,9 +115,9 @@ export async function runChain(opts: {
           });
         }
       }
-      if (target.baseURL !== activeModel.baseURL || target.model !== activeModel.model) {
-        agent.applyModelSwitch(target);
-        activeModel = target;
+      if (wantPreset !== activePreset) {
+        agent.applyModelSwitch(wantPreset ? agent.lookupModelPreset(wantPreset)! : baseModel);
+        activePreset = wantPreset;
       }
 
       chainState.running = {
@@ -230,7 +231,7 @@ export async function runChain(opts: {
     agent.setStepMcp(undefined, []);
     agent.setStepSubagents(undefined);
     // restore the session model if a per-step switch left us on another one
-    if (activeModel.baseURL !== baseModel.baseURL || activeModel.model !== baseModel.model) {
+    if (activePreset !== null) {
       agent.applyModelSwitch(baseModel);
       ui.pushItem({ type: "note", text: `⛓ restored session model: ${baseModel.model}` });
     }

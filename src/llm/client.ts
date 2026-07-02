@@ -13,12 +13,22 @@ export interface CompletionResult {
   text: string;
   toolCalls: ToolCall[];
   usage: Usage | null;
+  /** vLLM finish reason — "length" means the output was truncated at max_tokens */
+  finishReason: string | null;
 }
 
 export interface ToolSchema {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+}
+
+type StreamParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+
+/** Abort errors thrown out of streamOnce carry whether any output was already
+ *  delivered to the callbacks — decides if a stall may be retried silently. */
+interface StallError extends Error {
+  emittedOutput?: boolean;
 }
 
 /** Rough token estimate (chars/4), recalibrated by real usage when available. */
@@ -190,33 +200,79 @@ export class LlmClient {
       );
     }
     const maxOut = Math.min(s.maxTokens, room);
-    const stream = await this.client.chat.completions.create(
-      {
-        model: s.model,
-        messages,
-        stream: true,
-        stream_options: { include_usage: true },
-        temperature: samp.temperature,
-        top_p: samp.topP,
-        max_tokens: maxOut,
-        ...(tools.length > 0
-          ? {
-              tools: tools.map((t) => ({
-                type: "function" as const,
-                function: {
-                  name: t.name,
-                  description: t.description,
-                  parameters: t.parameters,
-                },
-              })),
-            }
-          : {}),
-        // vLLM extensions, passed through the OpenAI client untyped
-        ...(this.vllmExtras() as Record<string, never>),
-      },
-      { signal },
-    );
+    const params: StreamParams = {
+      model: s.model,
+      messages,
+      stream: true as const,
+      stream_options: { include_usage: true },
+      temperature: samp.temperature,
+      top_p: samp.topP,
+      max_tokens: maxOut,
+      ...(tools.length > 0
+        ? {
+            tools: tools.map((t) => ({
+              type: "function" as const,
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+              },
+            })),
+          }
+        : {}),
+      // vLLM extensions, passed through the OpenAI client untyped
+      ...(this.vllmExtras() as Record<string, never>),
+    };
 
+    // Stall watchdog: the SDK timeout only bounds time-to-headers; a stream
+    // that stops producing chunks (wedged vLLM, silent VPN drop) would hang
+    // the `for await` forever. Abort when no chunk arrives for stallMs. A
+    // stall before any output is retried once (nothing reached the UI yet);
+    // a mid-stream stall surfaces as an error the turn can report.
+    const stallMs = Math.max(10, s.streamStallSeconds) * 1000;
+    for (let attempt = 1; ; attempt++) {
+      const ac = new AbortController();
+      const onParentAbort = () => ac.abort();
+      signal?.addEventListener("abort", onParentAbort, { once: true });
+      let stalled = false;
+      let timer = setTimeout(() => {
+        stalled = true;
+        ac.abort();
+      }, stallMs);
+      const poke = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          stalled = true;
+          ac.abort();
+        }, stallMs);
+      };
+      try {
+        return await this.streamOnce(params, ac.signal, callbacks, poke);
+      } catch (err) {
+        if (signal?.aborted) throw err; // real user interrupt
+        if (!stalled) throw err;
+        const stalledEmpty = (err as StallError).emittedOutput === false;
+        if (stalledEmpty && attempt === 1) continue; // silent retry, UI saw nothing
+        throw new Error(
+          `model stream stalled — no data from ${s.baseURL} for ${stallMs / 1000}s` +
+            (stalledEmpty ? " (no output received)" : " (mid-response)"),
+        );
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onParentAbort);
+      }
+    }
+  }
+
+  /** One streaming request + chunk pump. `poke` is the watchdog reset, called
+   *  on every chunk. Throws StallError-augmented abort errors so `complete`
+   *  can tell whether anything already reached the callbacks. */
+  private async streamOnce(
+    params: StreamParams,
+    signal: AbortSignal,
+    callbacks: StreamCallbacks,
+    poke: () => void,
+  ): Promise<CompletionResult> {
     let text = "";
     let usage: Usage | null = null;
     // tool call fragments arrive as deltas keyed by index
@@ -240,8 +296,10 @@ export class LlmClient {
     let firstTokenAt = 0;
     let lastTokenAt = 0;
     let estGen = 0;
+    let emitted = false;
     const bumpGen = (s: string): void => {
       if (!s) return;
+      emitted = true;
       const now = Date.now();
       if (firstTokenAt === 0) firstTokenAt = now;
       lastTokenAt = now;
@@ -250,37 +308,50 @@ export class LlmClient {
       if (secs >= 0.05) this.lastTokensPerSec = estGen / secs;
     };
 
-    for await (const chunk of stream) {
-      const choice = chunk.choices?.[0];
-      const delta = choice?.delta;
+    let finishReason: string | null = null;
+    try {
+      const stream = await this.client.chat.completions.create(params, { signal });
+      for await (const chunk of stream) {
+        poke();
+        const choice = chunk.choices?.[0];
+        const delta = choice?.delta;
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
       // qwen3 reasoning parser: think tokens arrive in a separate field
       // ("reasoning" on current vLLM, "reasoning_content" on older builds);
       // content stays empty until the think block closes — never treat that
       // as an empty reply and never scan it for tool calls
-      const d = delta as Record<string, unknown> | undefined;
-      const reasoning = d?.["reasoning"] ?? d?.["reasoning_content"];
-      if (typeof reasoning === "string" && reasoning) {
-        callbacks.onReasoningDelta?.(reasoning);
-        bumpGen(reasoning);
+        const d = delta as Record<string, unknown> | undefined;
+        const reasoning = d?.["reasoning"] ?? d?.["reasoning_content"];
+        if (typeof reasoning === "string" && reasoning) {
+          callbacks.onReasoningDelta?.(reasoning);
+          bumpGen(reasoning);
+        }
+        if (delta?.content) {
+          think.feed(delta.content);
+          bumpGen(delta.content);
+        }
+        for (const tc of delta?.tool_calls ?? []) {
+          const frag = toolFrags.get(tc.index) ?? { id: "", name: "", args: "" };
+          if (tc.id) frag.id = tc.id;
+          if (tc.function?.name) frag.name += tc.function.name;
+          if (tc.function?.arguments) frag.args += tc.function.arguments;
+          toolFrags.set(tc.index, frag);
+          bumpGen((tc.function?.name ?? "") + (tc.function?.arguments ?? ""));
+        }
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+          };
+        }
       }
-      if (delta?.content) {
-        think.feed(delta.content);
-        bumpGen(delta.content);
-      }
-      for (const tc of delta?.tool_calls ?? []) {
-        const frag = toolFrags.get(tc.index) ?? { id: "", name: "", args: "" };
-        if (tc.id) frag.id = tc.id;
-        if (tc.function?.name) frag.name += tc.function.name;
-        if (tc.function?.arguments) frag.args += tc.function.arguments;
-        toolFrags.set(tc.index, frag);
-        bumpGen((tc.function?.name ?? "") + (tc.function?.arguments ?? ""));
-      }
-      if (chunk.usage) {
-        usage = {
-          promptTokens: chunk.usage.prompt_tokens,
-          completionTokens: chunk.usage.completion_tokens,
-        };
-      }
+      // the SDK's Stream ends iteration *gracefully* on abort — without this a
+      // watchdog abort would return the partial text as a normal completion
+      if (signal.aborted) throw new Error("stream aborted");
+    } catch (err) {
+      // let the watchdog's retry logic know whether the UI already saw output
+      (err as StallError).emittedOutput = emitted;
+      throw err;
     }
     think.flush();
 
@@ -300,7 +371,7 @@ export class LlmClient {
         function: { name: f.name, arguments: f.args },
       }));
 
-    return { text, toolCalls, usage };
+    return { text, toolCalls, usage, finishReason };
   }
 
   /** Single-shot, no tools, no streaming — used by memory extractor / compactor.

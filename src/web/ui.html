@@ -47,6 +47,8 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .sess .sid { color: var(--g); font-weight: 700; }
 .sess .cwd { color: var(--g-dim); font-size: 11px; word-break: break-all; }
 .sess .busy { color: var(--amber); }
+.sess .sessClose { float: right; color: var(--g-dim); cursor: pointer; padding: 0 3px; }
+.sess .sessClose:hover { color: var(--red); }
 #newSess { margin: 8px; padding: 6px; border: 1px dashed var(--g-dim); background: none; color: var(--g);
   cursor: pointer; font-family: inherit; }
 #newSess:hover { background: rgba(0,255,102,.1); }
@@ -411,12 +413,19 @@ const stream = (sid) => (S.streams[sid] ??= { text: "", reason: "" });
 function renderSessions() {
   $("sessionList").innerHTML = S.sessions.map((s) => {
     const st = S.status[s.sid] ?? {};
+    const closeBtn = s.origin === "cli" ? "" : `<span class="sessClose" onclick="closeSession('${s.sid}', event)" title="close session (frees its MCP servers)">✕</span>`;
     return `<div class="sess ${s.sid === S.current ? "active" : ""}" onclick="selectSession('${s.sid}')">
-      <div class="sid">${s.origin === "cli" ? "⌨ " : ""}${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}</div>
+      <div class="sid">${s.origin === "cli" ? "⌨ " : ""}${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}${closeBtn}</div>
       <div class="cwd">${esc(s.cwd)}</div></div>`;
   }).join("");
 }
 function selectSession(sid) { S.current = sid; renderSessions(); renderAll(); }
+function closeSession(sid, ev) {
+  ev.stopPropagation();
+  if (!confirm(`Close session ${sid}? Its transcript and MCP servers are torn down.`)) return;
+  send({ t: "close_session", sid });
+  if (S.current === sid) S.current = null;
+}
 $("newSess").onclick = () => {
   const cwd = prompt("project directory:", S.defaultCwd);
   if (cwd) send({ t: "new_session", cwd });
@@ -873,9 +882,11 @@ function openChainEditor(m) {
   const cfgs = def.stepConfigs || {};
   const lookup = (step) => {
     const k = String(step).toLowerCase().trim();
-    return cfgs[k] || cfgs[k.split(/\s+/)[0]] || {};
+    // full text, first word, then before-the-first-colon: the frontmatter
+    // parser keys a "review: check x" row as "review" (splits at the colon)
+    return cfgs[k] || cfgs[k.split(/\s+/)[0]] || cfgs[k.split(":")[0].trim()] || {};
   };
-  const blankRow = () => ({ step: "", model: "", think: "", temp: "", gate: "", require: [], forbid: [], mcp: true, mcptools: [], subagents: false });
+  const blankRow = () => ({ step: "", model: "", think: "", temp: "", gate: "", require: [], forbid: [], mcp: true, mcptools: [], subagents: "" });
   const rows = (def.steps || []).map((step) => {
     const c = lookup(step);
     return {
@@ -889,7 +900,9 @@ function openChainEditor(m) {
       // undefined (old chains) reflects current all-on behavior → checked
       mcp: c.mcpEnabled !== false,
       mcptools: Array.isArray(c.mcpTools) ? c.mcpTools : [],
-      subagents: c.subagentsEnabled !== false,
+      // tri-state: "" inherits (tools available, no nudge), "on" adds the
+      // fan-out nudge, "off" removes the spawn tools
+      subagents: c.subagentsEnabled === true ? "on" : c.subagentsEnabled === false ? "off" : "",
     };
   });
   if (!rows.length) rows.push(blankRow());
@@ -946,7 +959,7 @@ function renderChainRows() {
         <label><span class="cseSkLbl">forbid (${r.forbid.length})${r.forbid.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'forbid')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="forbid" title="skills blocked from auto-load and the skill tool this step">${cseSkillOpts(r.forbid)}</select></label>
       </div>
       <div class="cseMcp">
-        <label class="cseChk"><input type="checkbox" data-i="${i}" data-f="subagents" ${r.subagents ? "checked" : ""}> sub-agents</label>
+        <select data-i="${i}" data-f="subagents" title="sub-agents: inherit = spawn tools available; fan-out = nudge the step to spawn sub-agents; off = remove the spawn tools">${cseTriOpts([["", "agents:inherit"], ["on", "agents:fan-out"], ["off", "agents:off"]], r.subagents)}</select>
         <label class="cseChk"><input type="checkbox" data-i="${i}" data-f="mcp" ${r.mcp ? "checked" : ""}> MCP tools</label>
         ${noMcp ? "" : `<label class="cseMcpOnly"><span class="cseSkLbl">only (${r.mcptools.length}, empty = all)${r.mcptools.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'mcptools')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="mcptools" title="restrict this step to these MCP tools (requires the checkbox on)">${cseMcpOpts(r.mcptools)}</select></label>`}
       </div>
@@ -979,9 +992,12 @@ function cseSave() {
     if (r.gate === "on") c.gate = true; else if (r.gate === "off") c.gate = false;
     if (r.require && r.require.length) c.requiredSkills = r.require;
     if (r.forbid && r.forbid.length) c.forbiddenSkills = r.forbid;
-    c.mcpEnabled = !!r.mcp;
-    if (r.mcp && r.mcptools && r.mcptools.length) c.mcpTools = r.mcptools;
-    c.subagentsEnabled = !!r.subagents;
+    // only serialize deviations from inherit — a blanket subagents=on would
+    // inject the fan-out nudge into every step, and mcp=on with no subset is
+    // the same as inheriting (all tools available)
+    if (!r.mcp) c.mcpEnabled = false;
+    else if (r.mcptools && r.mcptools.length) { c.mcpEnabled = true; c.mcpTools = r.mcptools; }
+    if (r.subagents === "on") c.subagentsEnabled = true; else if (r.subagents === "off") c.subagentsEnabled = false;
     if (Object.keys(c).length) stepConfigs[step.toLowerCase()] = c;
   }
   if (!ce.name.trim()) return toast("chain needs a name");

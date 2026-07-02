@@ -50,7 +50,10 @@ export class WebSession {
   private store: SessionStore;
   private broadcast: Broadcast;
   private streamText = "";
-  private pending = new Map<string, (answer: string) => void>();
+  /** unanswered perm/ask prompts: payload kept so reconnecting browsers get
+   *  them replayed — otherwise a reload while a prompt is up hangs the turn
+   *  forever (the promise only resolves via an answer with this reqId) */
+  private pending = new Map<string, { msg: Record<string, unknown>; resolve: (answer: string) => void }>();
   private pendingCounter = 0;
   private queue: Array<{ kind: "prompt"; text: string; images?: string[] } | { kind: "chain"; def: ChainDef; mode: ChainContextMode; task: string }> = [];
   private running = false;
@@ -110,14 +113,16 @@ export class WebSession {
       requestPermission: (req) =>
         new Promise((resolve) => {
           const reqId = `p${++this.pendingCounter}`;
-          this.pending.set(reqId, (a) => resolve(a as "yes" | "always" | "no"));
-          this.send({ t: "perm_req", reqId, detail: req.detail, preview: req.preview ?? null });
+          const msg = { t: "perm_req", reqId, detail: req.detail, preview: req.preview ?? null };
+          this.pending.set(reqId, { msg, resolve: (a) => resolve(a as "yes" | "always" | "no") });
+          this.send(msg);
         }),
       askUser: (question, options) =>
         new Promise((resolve) => {
           const reqId = `a${++this.pendingCounter}`;
-          this.pending.set(reqId, resolve);
-          this.send({ t: "ask_req", reqId, question, options: options ?? null });
+          const msg = { t: "ask_req", reqId, question, options: options ?? null };
+          this.pending.set(reqId, { msg, resolve });
+          this.send(msg);
         }),
       setBusy: (busy, what) => {
         this.busy = busy;
@@ -300,11 +305,17 @@ export class WebSession {
   }
 
   answer(reqId: string, value: string): void {
-    const resolve = this.pending.get(reqId);
-    if (resolve) {
+    const entry = this.pending.get(reqId);
+    if (entry) {
       this.pending.delete(reqId);
-      resolve(value);
+      entry.resolve(value);
     }
+  }
+
+  /** Re-send unanswered perm/ask prompts (a newly connected browser would
+   *  otherwise never see them and the awaiting turn would hang forever). */
+  replayPending(): void {
+    for (const { msg } of this.pending.values()) this.send(msg);
   }
 
   setMode(mode: string): void {
@@ -321,6 +332,18 @@ export class WebSession {
 
   interrupt(): void {
     this.agent.stop();
+  }
+
+  /** Tear the session down: abort any run, release pending prompts, and close
+   *  MCP servers (their child processes — playwright chrome etc. — otherwise
+   *  live until the grayskull-web process dies). */
+  close(): void {
+    this.agent.stop();
+    for (const [reqId, entry] of this.pending) {
+      this.pending.delete(reqId);
+      entry.resolve("no");
+    }
+    void this.mcp.closeAll().catch(() => {});
   }
 
   /** Open the browser chain editor for `name` (blank → create a new chain). */
@@ -364,7 +387,7 @@ export class WebSession {
       if (!name) return this.send({ t: "chain_error", message: "chain needs a name" });
       if (!steps.length) return this.send({ t: "chain_error", message: "chain needs at least one step" });
       const ctxMode: ChainContextMode = raw["context"] === "fresh" ? "fresh" : "shared";
-      const stepConfigs = raw["stepConfigs"] as Record<string, StepConfig> | undefined;
+      const stepConfigs = sanitizeStepConfigs(raw["stepConfigs"]);
       const path = saveChain({
         name,
         description: String(raw["description"] ?? ""),
@@ -379,6 +402,34 @@ export class WebSession {
       this.send({ t: "chain_error", message: (err as Error).message });
     }
   }
+}
+
+/** Browser payloads are untrusted — keep only correctly-typed StepConfig
+ *  fields so junk never reaches the chain file. */
+function sanitizeStepConfigs(raw: unknown): Record<string, StepConfig> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const strArr = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === "string") && v.length ? (v as string[]) : undefined;
+  const out: Record<string, StepConfig> = {};
+  for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!name.trim() || !v || typeof v !== "object") continue;
+    const c = v as Record<string, unknown>;
+    const cfg: StepConfig = {};
+    if (typeof c["model"] === "string" && c["model"]) cfg.model = c["model"];
+    if (typeof c["enableThinking"] === "boolean") cfg.enableThinking = c["enableThinking"];
+    if (typeof c["temperature"] === "number" && Number.isFinite(c["temperature"])) cfg.temperature = c["temperature"];
+    if (typeof c["gate"] === "boolean") cfg.gate = c["gate"];
+    const req = strArr(c["requiredSkills"]);
+    if (req) cfg.requiredSkills = req;
+    const forbid = strArr(c["forbiddenSkills"]);
+    if (forbid) cfg.forbiddenSkills = forbid;
+    if (typeof c["mcpEnabled"] === "boolean") cfg.mcpEnabled = c["mcpEnabled"];
+    const mcpTools = strArr(c["mcpTools"]);
+    if (mcpTools) cfg.mcpTools = mcpTools;
+    if (typeof c["subagentsEnabled"] === "boolean") cfg.subagentsEnabled = c["subagentsEnabled"];
+    if (Object.keys(cfg).length) out[name.trim().toLowerCase()] = cfg;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export class SessionManager {
@@ -412,5 +463,13 @@ export class SessionManager {
 
   broadcastList(): void {
     this.broadcast({ t: "sessions", list: [...this.sessions.values()].map((s) => s.summary()) });
+  }
+
+  close(sid: string): void {
+    const session = this.sessions.get(sid);
+    if (!session) return;
+    this.sessions.delete(sid);
+    session.close();
+    this.broadcastList();
   }
 }

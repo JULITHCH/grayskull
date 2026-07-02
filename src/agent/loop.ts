@@ -1,6 +1,6 @@
 import type { ChatMessage, ToolContext, TranscriptItem } from "../types";
 import type { Settings } from "../config/settings";
-import { loadSystemPrompt, loadLegendaryMode } from "../config/settings";
+import { loadSystemPrompt, loadLegendaryMode, DEFAULT_MAX_TOKENS } from "../config/settings";
 import type { LlmClient, ToolSchema } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import type { PermissionEngine } from "../perms/engine";
@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 
 const MAX_LOOP_TURNS = 40;
 const MAX_REPAIR_ATTEMPTS = 3;
+const MAX_LENGTH_CONTINUES = 3;
 
 export interface PermissionRequest {
   toolName: string;
@@ -65,6 +66,7 @@ export async function runToolLoop(opts: {
   const knownTools = new Set(schemas.map((s) => s.name));
   const repairCounts = new Map<string, number>();
   let lastText = "";
+  let lengthContinues = 0;
 
   for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
     if (signal?.aborted) break;
@@ -107,7 +109,22 @@ export async function runToolLoop(opts: {
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(sanitizeToolCallArgs) } : {}),
     });
 
-    if (toolCalls.length === 0) break;
+    if (toolCalls.length === 0) {
+      // truncation at max_tokens looks like the agent just stopped mid-sentence
+      // (no tool call ever completed) — ask it to pick up where it was cut off
+      // instead of silently ending the turn
+      if (result.finishReason === "length" && lengthContinues < MAX_LENGTH_CONTINUES) {
+        lengthContinues++;
+        ctx.note(`⚠ output truncated at max_tokens — asking the model to continue (${lengthContinues}/${MAX_LENGTH_CONTINUES})`);
+        messages.push({
+          role: "user",
+          content:
+            "[Your previous message was cut off at the output-token limit. Continue exactly where you stopped — do not repeat what you already wrote. If you were about to call a tool, emit the tool call now, and keep any single tool input small enough to fit (e.g. write files in chunks with edit).]",
+        });
+        continue;
+      }
+      break;
+    }
 
     // Phase A — validate + preview + permission, SEQUENTIALLY (one modal at a
     // time, in order). Produces an ordered task per call: either an immediate
@@ -296,7 +313,9 @@ export class GrayskullAgent {
     s.model = preset.model;
     if (preset.apiKeyEnv !== undefined) s.apiKeyEnv = preset.apiKeyEnv;
     if (preset.contextWindow !== undefined) s.contextWindow = preset.contextWindow;
-    if (preset.maxTokens !== undefined) s.maxTokens = preset.maxTokens;
+    // always reset: a small preset's cap (e.g. nemotron's 4096) must not leak
+    // into the next preset that doesn't set its own
+    s.maxTokens = preset.maxTokens ?? DEFAULT_MAX_TOKENS;
     if (preset.temperature !== undefined) s.temperature = preset.temperature;
     if (preset.topP !== undefined) s.topP = preset.topP;
     if (preset.topK !== undefined) s.topK = preset.topK;

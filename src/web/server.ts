@@ -128,6 +128,10 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "chain_save":
         session?.chainSave((msg["def"] as Record<string, unknown>) ?? {});
         break;
+      case "close_session":
+        manager.close(sid);
+        broadcastSessions();
+        break;
     }
   };
 
@@ -157,6 +161,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
           ws.send(JSON.stringify({ t: "replay", sid: s.sid, items: s.items.slice(-300) }));
           s.sendStatus();
           s.sendMemory();
+          s.replayPending();
         }
         for (const c of cliSessions.values()) {
           ws.send(JSON.stringify({ t: "replay", sid: c.sid, items: c.items.slice(-300) }));

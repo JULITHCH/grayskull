@@ -280,7 +280,9 @@ export function isGate(step: string): boolean {
   return GATE_RE.test(step);
 }
 
-/** Look up a step's per-step config (full text, then first word). */
+/** Look up a step's per-step config (full text, first word, then the part
+ *  before the first colon — parseStepsBlock keys a "review: check x" row as
+ *  "review" because its regex splits at the first colon). */
 export function resolveStepConfig(
   step: string,
   chain?: Pick<ChainDef, "stepConfigs">,
@@ -288,7 +290,7 @@ export function resolveStepConfig(
   const cfgs = chain?.stepConfigs;
   if (!cfgs) return undefined;
   const key = step.toLowerCase().trim();
-  return cfgs[key] ?? cfgs[key.split(/\s/)[0]!];
+  return cfgs[key] ?? cfgs[key.split(/\s/)[0]!] ?? cfgs[key.split(":")[0]!.trim()];
 }
 
 /** Gate detection honouring a per-step `gate=` override, else the regex. */

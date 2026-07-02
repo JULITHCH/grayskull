@@ -29,6 +29,10 @@ const McpServerSchema = z.union([
 ]);
 
 /** A named model preset: the full stack to switch to with /model <name>. */
+/** default output-token cap; model presets without their own maxTokens reset
+ *  to this on switch (so a small preset's cap never leaks to the next model) */
+export const DEFAULT_MAX_TOKENS = 32768;
+
 const ModelPresetSchema = z.object({
   family: z.enum(["qwen3.5", "glm4.5"]),
   baseURL: z.string(),
@@ -54,7 +58,10 @@ export const SettingsSchema = z.object({
   /** model family — selects leak-recovery dialect + chain-step sampling presets. */
   modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
   contextWindow: z.number().default(262144),
-  maxTokens: z.number().default(32768),
+  maxTokens: z.number().default(DEFAULT_MAX_TOKENS),
+  /** abort an LLM request when no stream chunk arrives for this long (wedged
+   *  vLLM / dropped VPN) — retried once if no output was received yet */
+  streamStallSeconds: z.number().min(10).default(120),
   // Qwen non-thinking coding preset
   temperature: z.number().default(0.7),
   topP: z.number().default(0.8),
