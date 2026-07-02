@@ -63,6 +63,9 @@ export async function runToolLoop(opts: {
   drainInjections?: () => string[];
   /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
   maxTurns?: number;
+  /** unattended run (kamikazeee): the iteration cap warns instead of stopping —
+   *  the loop keeps going until the model finishes or the user interrupts */
+  unattended?: () => boolean;
 }): Promise<string> {
   const { client, registry, schemas, messages, ctx, signal } = opts;
   const knownTools = new Set(schemas.map((s) => s.name));
@@ -74,10 +77,17 @@ export async function runToolLoop(opts: {
   // used to end the turn in total silence, which reads as a hang
   let ranOut = true;
 
-  for (let turn = 0; turn < maxTurns; turn++) {
+  for (let turn = 0; ; turn++) {
     if (signal?.aborted) {
       ranOut = false;
       break;
+    }
+    if (turn >= maxTurns) {
+      if (!opts.unattended?.()) break; // ranOut note below tells the user
+      // kamikazeee runs unattended: warn at every cap multiple, never stop
+      if (turn % maxTurns === 0) {
+        ctx.note(`⚠ KAMIKAZEEE unattended — ${turn} tool iterations and counting (esc to stop)`);
+      }
     }
     // free the window before the next request if the accumulated tool results
     // have filled it (mid-turn) — keeps a single long turn from overflowing
@@ -131,6 +141,9 @@ export async function runToolLoop(opts: {
             "[Your previous message was cut off at the output-token limit. Continue exactly where you stopped — do not repeat what you already wrote. If you were about to call a tool, emit the tool call now, and keep any single tool input small enough to fit (e.g. write files in chunks with edit).]",
         });
         continue;
+      }
+      if (result.finishReason === "length") {
+        ctx.note(`⚠ output still truncated after ${MAX_LENGTH_CONTINUES} continues — ending the turn`);
       }
       ranOut = false;
       break;
@@ -667,6 +680,15 @@ export class GrayskullAgent {
       cwd: this.cwd,
       signal,
       askUser: async (question, options) => {
+        // kamikazeee runs unattended — a blocking question would hang the run
+        // forever with nobody there to answer it
+        if (this.perms.mode === "kamikazeee") {
+          const answer =
+            "No human is watching (kamikazeee unattended mode). Decide yourself using best judgment and continue; note the decision in your final summary.";
+          this.ui.pushItem({ type: "note", text: `⚠ KAMIKAZEEE auto-answered ask_user: ${question.slice(0, 120)}` });
+          turnLog.push(`agent asked: ${question}\nauto-answer (kamikazeee): decide yourself`);
+          return answer;
+        }
         const answer = await this.ui.askUser(question, options);
         turnLog.push(`agent asked: ${question}\nuser answered: ${answer}`);
         return answer;
@@ -678,6 +700,7 @@ export class GrayskullAgent {
       registry: this.registry,
       schemas: this.registry.schemas(this.toolFilter()),
       maxTurns: this.settings.maxLoopTurns,
+      unattended: () => this.perms.mode === "kamikazeee",
       leakDialect: this.leakDialect,
       maybeCompact: (m) => this.compactInLoop(m),
       drainInjections: () => {
