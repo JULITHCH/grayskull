@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
-import type { PermissionMode, TranscriptItem } from "../types";
+import type { ChatMessage, PermissionMode, TranscriptItem } from "../types";
 import { MODE_ORDER } from "../types";
 import { loadSettings, type Settings } from "../config/settings";
 import { ensureDirs } from "../config/paths";
@@ -24,8 +24,9 @@ import { runSlashCommand, type CommandContext } from "../slash";
 import { modelProfile } from "../llm/profiles";
 
 /** slash commands that open $EDITOR or fzf — they would hang the server.
- *  `/tc edit` is NOT here: in the browser it opens the clickable chain editor. */
-const TERMINAL_ONLY = /^\/(system|settings|resume)\b|^\/(memory|agents)\s+edit\b/;
+ *  `/tc edit` opens the clickable chain editor instead; /resume is tty-free
+ *  (numbered list) and works here. */
+const TERMINAL_ONLY = /^\/(system|settings)\b|^\/(memory|agents)\s+edit\b/;
 
 /** `/tc edit [name]` / `/thinkingchain edit [name]` → browser chain editor */
 const CHAIN_EDIT_RE = /^\/(?:tc|thinkingchain)\s+edit\b\s*(.*)$/;
@@ -262,6 +263,14 @@ export class WebSession {
     if (/^\/(tc|thinkingchain)\s+off\b/.test(text)) {
       this.sticky = null;
     }
+    // /resume N replaced agent.history — rebuild the browser transcript from
+    // it so the resumed conversation is visible, not just a "resumed" note
+    if (/^\/resume\s+\d+/.test(text) && this.agent.history.length) {
+      this.items.length = 0;
+      this.items.push(...historyToItems(this.agent.history));
+      this.items.push({ type: "note", text: `resumed — ${this.agent.history.length} messages restored` });
+      this.send({ t: "replay", items: this.items.slice(-300) });
+    }
     // reflect any setting a command may have changed (e.g. /thinking)
     this.sendStatus();
   }
@@ -402,6 +411,45 @@ export class WebSession {
       this.send({ t: "chain_error", message: (err as Error).message });
     }
   }
+}
+
+/** Rebuild transcript items from a resumed ChatMessage history so the browser
+ *  can render the old conversation. Tool calls become done tool items with
+ *  their results attached; system messages are skipped. */
+function historyToItems(history: ChatMessage[]): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  // tool results arrive as separate messages keyed by call id
+  const results = new Map<string, string>();
+  for (const m of history) {
+    if (m.role === "tool" && typeof m.content === "string") results.set(m.tool_call_id, m.content);
+  }
+  const text = (c: unknown): string => {
+    if (typeof c === "string") return c;
+    if (Array.isArray(c)) {
+      return c.map((p) => (p && typeof p === "object" && "text" in p ? String(p.text) : "")).join("");
+    }
+    return "";
+  };
+  for (const m of history) {
+    if (m.role === "user") {
+      const t = text(m.content);
+      if (t) items.push({ type: "user", text: t });
+    } else if (m.role === "assistant") {
+      const t = text(m.content);
+      if (t) items.push({ type: "assistant", text: t });
+      for (const tc of m.tool_calls ?? []) {
+        if (tc.type !== "function") continue;
+        items.push({
+          type: "tool",
+          name: tc.function.name,
+          detail: `${tc.function.name}(${tc.function.arguments.slice(0, 120)})`,
+          result: results.get(tc.id)?.slice(0, 2000),
+          state: "done",
+        });
+      }
+    }
+  }
+  return items;
 }
 
 /** Browser payloads are untrusted — keep only correctly-typed StepConfig
