@@ -62,6 +62,9 @@ export const SettingsSchema = z.object({
   /** abort an LLM request when no stream chunk arrives for this long (wedged
    *  vLLM / dropped VPN) — retried once if no output was received yet */
   streamStallSeconds: z.number().min(10).default(120),
+  /** max tool iterations per turn — hitting it stops the turn (with a note);
+   *  long autonomous sessions exhausted the old hardcoded 40 mid-task */
+  maxLoopTurns: z.number().min(1).default(120),
   // Qwen non-thinking coding preset
   temperature: z.number().default(0.7),
   topP: z.number().default(0.8),

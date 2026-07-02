@@ -61,15 +61,24 @@ export async function runToolLoop(opts: {
   /** drains user steering messages typed mid-run (via /inject); each is appended
    *  to the conversation before the next model call so it changes course live */
   drainInjections?: () => string[];
+  /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
+  maxTurns?: number;
 }): Promise<string> {
   const { client, registry, schemas, messages, ctx, signal } = opts;
   const knownTools = new Set(schemas.map((s) => s.name));
   const repairCounts = new Map<string, number>();
   let lastText = "";
   let lengthContinues = 0;
+  const maxTurns = opts.maxTurns ?? MAX_LOOP_TURNS;
+  // distinguishes "model finished" from "iteration cap ran out" — the latter
+  // used to end the turn in total silence, which reads as a hang
+  let ranOut = true;
 
-  for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
-    if (signal?.aborted) break;
+  for (let turn = 0; turn < maxTurns; turn++) {
+    if (signal?.aborted) {
+      ranOut = false;
+      break;
+    }
     // free the window before the next request if the accumulated tool results
     // have filled it (mid-turn) — keeps a single long turn from overflowing
     if (opts.maybeCompact) await opts.maybeCompact(messages);
@@ -123,6 +132,7 @@ export async function runToolLoop(opts: {
         });
         continue;
       }
+      ranOut = false;
       break;
     }
 
@@ -238,6 +248,11 @@ export async function runToolLoop(opts: {
     for (const call of toolCalls) {
       messages.push({ role: "tool", tool_call_id: call.id, content: results.get(call.id) ?? "[interrupted]" });
     }
+  }
+  if (ranOut) {
+    ctx.note(
+      `⚠ stopped after ${maxTurns} tool iterations (maxLoopTurns) mid-task — say "continue" to keep going`,
+    );
   }
   return lastText;
 }
@@ -662,6 +677,7 @@ export class GrayskullAgent {
       client: this.client,
       registry: this.registry,
       schemas: this.registry.schemas(this.toolFilter()),
+      maxTurns: this.settings.maxLoopTurns,
       leakDialect: this.leakDialect,
       maybeCompact: (m) => this.compactInLoop(m),
       drainInjections: () => {
