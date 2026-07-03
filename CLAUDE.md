@@ -79,7 +79,11 @@ rendered dimmed, never scanned for tool calls.
   holds the text-only rendering-test playbook (console → snapshot → layout assertions
   via browser_evaluate → screenshots for the human).
 - `ui/App.tsx` — single-file Ink UI (transcript, custom input, permission/ask prompts,
-  statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf.
+  statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf. `ui/setup.tsx` —
+  /setup dialog: edit endpoints in place (live-applied via `client.reconfigure` /
+  `mcp.reconnect`, saved as patches to global settings.json) + install/health checks
+  for searxng (instance probed via fetch), context7, lsp-ts, playwright with fix
+  instructions; opened through `CommandContext.openSetup` (TUI only).
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
   via `with {type:"text"}`; `session.ts` WebSession wraps GrayskullAgent with a WS
   bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask

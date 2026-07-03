@@ -49,6 +49,8 @@ export interface CommandContext {
   push: (item: TranscriptItem) => void;
   setMode: (mode: PermissionMode) => void;
   clearTranscript: () => void;
+  /** open the /setup dialog (terminal UI only; absent in web sessions) */
+  openSetup?: () => void;
   exit: () => void;
 }
 
@@ -85,6 +87,16 @@ export const COMMANDS: SlashCommand[] = [
       if (local && !existsSync(path)) writeFileSync(path, "# Project instructions\n");
       openInEditor(path, ctx.settings.editor);
       note(ctx, `edited ${path} — applies from the next message`);
+    },
+  },
+  {
+    name: "setup",
+    description: "setup dialog: configure endpoints, check searxng/context7/lsp/playwright",
+    run: async (ctx) => {
+      if (!ctx.openSetup) {
+        return note(ctx, "/setup is a terminal dialog — run it in the CLI session");
+      }
+      ctx.openSetup();
     },
   },
   {

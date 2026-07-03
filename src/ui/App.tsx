@@ -21,6 +21,7 @@ import { renderMarkdown } from "./markdown";
 import { pickFile } from "./external";
 import { extractImages } from "./images";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
+import { SetupDialog } from "./setup";
 import { localDir } from "../config/paths";
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -160,6 +161,7 @@ export function App(props: AppProps): React.ReactElement {
     setPendingAskState(a);
   };
   const [memFlash, setMemFlash] = useState("");
+  const [setupOpen, setSetupOpen] = useState(false);
   const [, forceRender] = useState(0);
 
   const streamRef = useRef("");
@@ -483,6 +485,7 @@ export function App(props: AppProps): React.ReactElement {
         push: pushItem,
         setMode,
         clearTranscript: () => setStaticItems([]),
+        openSetup: () => setSetupOpen(true),
         // real teardown (MCP, hub link, process.exit) runs in index.tsx
         // via waitUntilExit once Ink unmounts
         exit: () => exit(),
@@ -512,6 +515,9 @@ export function App(props: AppProps): React.ReactElement {
   };
 
   useInput((char, key) => {
+    // the /setup dialog has its own useInput — ignore everything while open
+    if (setupOpen) return;
+
     // permission prompt steals the keyboard
     if (pendingPerm) {
       const c = char.toLowerCase();
@@ -671,6 +677,20 @@ export function App(props: AppProps): React.ReactElement {
         <Box marginTop={1}>
           <Text>{streamTail}</Text>
         </Box>
+      )}
+
+      {setupOpen && (
+        <SetupDialog
+          cwd={cwd}
+          settings={settings}
+          mcp={mcp}
+          client={client}
+          onNote={(text) => pushItem({ type: "note", text })}
+          onClose={() => {
+            setSetupOpen(false);
+            publishStatus(); // endpoint edits change the statusline (model, ctx)
+          }}
+        />
       )}
 
       {pendingPerm && <PermissionPrompt pending={pendingPerm} />}
