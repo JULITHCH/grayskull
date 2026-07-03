@@ -7,8 +7,10 @@ the 119 GiB box.
 
 The model is not frontier-smart, so the harness does extra lifting: persistent two-tier
 memory with brain-like scoring, ask-back interviews, tool-call repair, mandatory web
-verification, sub-agent fan-out, user-composable thinking chains, image input, live model
-switching, a matrix-style web UI, and aggressive context hygiene.
+verification, stuck-detection with auto web-research, sub-agent fan-out, user-composable
+thinking chains, image input (pasted *and* from tool results — the agent sees its own
+Playwright screenshots), scheduled unattended workers, live model switching, a
+matrix-style web UI with zen mode, and aggressive context hygiene.
 
 ---
 
@@ -196,6 +198,13 @@ Declared in settings (global or per project):
 Tools appear to the model as `mcp__<server>__<tool>`. `/mcp` shows status,
 `/mcp reconnect <name>` reconnects. Connection failures are reported, never fatal.
 
+**MCP image results reach the model as images.** Tool results containing image
+content (e.g. a Playwright screenshot) are forwarded as data URIs and attached to
+the conversation as `image_url` parts — the chat API's tool role is text-only, so
+they ride a follow-up user message. With a vision-capable served model the agent
+actually *sees* what it screenshots; compaction replaces old image parts with
+`[image]` placeholders so base64 never bloats summarizer prompts.
+
 ## Code intelligence (always on, full auto)
 
 Three layers that catch weak-model mistakes mechanically:
@@ -212,6 +221,12 @@ Three layers that catch weak-model mistakes mechanically:
   resolves per session. The system prompt steers the model to LSP over grep.
 - **Context7** — current, version-specific library docs (`resolve-library-id` →
   `get-library-docs`); kills stale-API hallucinations and feeds the memory distiller.
+- **Stuck detection → auto web-research** — pure-code tracker (`agent/stuck.ts`):
+  after 10 edits without resolving the problem, or when you report the same problem
+  a second time (lexical similarity between problem-looking prompts), a one-shot
+  nudge is injected telling the model to stop guessing and research the problem
+  online (searxng) first. Config: `"stuckResearch": { "enabled", "editThreshold",
+  "repeatThreshold" }`.
 
 ## Browser testing (Playwright MCP)
 
@@ -219,15 +234,19 @@ The seeded global settings include a `playwright` MCP server
 (`npx @playwright/mcp --browser chrome --headless`, 23 tools) driving your installed
 Chrome. Delete the entry from settings if you don't want it.
 
-The model has no vision, so rendering issues are caught the text way — the global
-`webtest` skill (`/webtest <url>`, also in `examples/skills/`) encodes the playbook:
+Screenshots taken through Playwright are attached to the conversation as real
+images (see MCP servers above) — with a vision-capable model the agent inspects
+the rendered page itself instead of guessing from the DOM. The global `webtest`
+skill (`/webtest <url>`, also in `examples/skills/`) encodes the full playbook,
+combining the text checks with visual ones:
 
 1. console errors first (most rendering bugs are JS errors)
 2. accessibility snapshot = structure check
 3. `browser_evaluate` layout assertions: element overflow, sibling overlaps,
-   horizontal scrollbar, zero-size elements — measured in pixels, no eyes needed
+   horizontal scrollbar, zero-size elements — measured in pixels
 4. interactions (clicks, keys) with re-checks; repeat at mobile width
-5. screenshots saved to `.grayskull/screenshots/` **for the human** — you see what it can't
+5. screenshots — inspected by the model *and* saved to `.grayskull/screenshots/`
+   for the human
 
 ## Sub-agents + auto agent creation
 
@@ -384,6 +403,12 @@ WebSockets, zero frontend build):
 - permission and ask_user requests pop as modals (y/a/n keys work)
 - mode buttons incl. KAMIKAZEEE — which flips the whole UI into a red-alert theme,
   matrix rain included
+- **ZEN mode** (◱ button, ctrl+.) — the GUI fades away, leaving the 3D **memory
+  ocean**: the project's memories as a rotating star cloud (drag to rotate, scroll
+  to zoom). An ambient space track fades in, and the live turn ghosts
+  half-transparent over the ocean — thinking (dim italic), the streaming answer
+  and the currently running tool call, bottom-anchored with older lines fading
+  out. Watch it work from across the room. esc returns.
 - digital rain + CRT scanlines, session replay on reconnect, esc interrupts
 
 **CLI sessions join the hub.** Every terminal `grayskull` automatically connects to a
@@ -395,6 +420,25 @@ mirror each other in real time, and a prompt answered in one closes the dialog i
 other. Hub URL override: `GRAYSKULL_HUB=ws://host:4242/cli`.
 
 No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
+
+## Workers + scheduler — unattended jobs
+
+Workers are user-created "plugins": a markdown playbook describing one kind of
+action against the outside world (post to LinkedIn, message a Discord channel, …)
+plus a config sidecar holding the credentials it needs (secrets stored chmod-600,
+masked in listings). The model creates and runs them itself via tools:
+
+- `create_worker` — write the playbook + declare config fields
+- `worker_config` — fill in credentials/identifiers (asks you for the values)
+- `run_worker` — headless one-shot run: playbook + config as system prompt,
+  builtin tools only, everything auto-approved
+- `schedule_job` / `remove_job` — recurring runs: `every: "30m" | "2h" | "1d" | "1w"`,
+  with `at: "HH:MM"` and `weekday` for day/week jobs
+
+The scheduler lives in the grayskull-web process (the always-on daemon); the TUI
+edits the same `~/.config/grayskull/jobs.json`. Results land in per-job logs
+(`~/.config/grayskull/job-logs/`) and the web UI's **AUTO** tab, which shows
+workers, jobs, next/last runs and lets you toggle or trigger them.
 
 ## Context management
 

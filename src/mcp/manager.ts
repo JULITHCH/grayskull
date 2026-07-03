@@ -115,9 +115,14 @@ function mcpToolDef(
     execute: async (args) => {
       const result = await client.callTool({ name: toolName, arguments: args });
       const parts: string[] = [];
+      const images: string[] = [];
       for (const item of (result.content ?? []) as Array<Record<string, unknown>>) {
         if (item["type"] === "text") parts.push(String(item["text"]));
-        else parts.push(JSON.stringify(item));
+        else if (item["type"] === "image" && typeof item["data"] === "string") {
+          // e.g. playwright browser_take_screenshot — forward as data URI so the
+          // loop can show it to the (vision) model instead of stringified base64
+          images.push(`data:${String(item["mimeType"] ?? "image/png")};base64,${item["data"]}`);
+        } else parts.push(JSON.stringify(item));
       }
       let out = parts.join("\n");
       if (out.length > 30_000) out = out.slice(0, 30_000) + "\n[truncated]";
@@ -126,6 +131,9 @@ function mcpToolDef(
       if (server === "searxng" && /search/i.test(toolName) && out.includes("http")) {
         out +=
           "\n\n[These are only search snippets. Before drawing conclusions, fetch the 1-3 most relevant URLs above with mcp__searxng__web_url_read and read the actual pages.]";
+      }
+      if (images.length > 0) {
+        return { text: out || `(${images.length} image${images.length > 1 ? "s" : ""} attached)`, images };
       }
       return out || "(empty result)";
     },

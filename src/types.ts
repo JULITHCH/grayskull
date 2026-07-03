@@ -26,6 +26,14 @@ export interface ToolContext {
   signal?: AbortSignal;
 }
 
+/** Rich tool result: text plus optional images (data URIs). Tool messages are
+ *  text-only in the chat API, so the loop re-attaches images as `image_url`
+ *  parts on a follow-up user message (vision models). */
+export interface ToolResult {
+  text: string;
+  images?: string[];
+}
+
 export interface ToolDef {
   name: string;
   description: string;
@@ -37,7 +45,7 @@ export interface ToolDef {
   describeCall: (args: Record<string, unknown>) => string;
   /** Optional rich preview (e.g. a diff) shown in the permission prompt. */
   previewCall?: (args: Record<string, unknown>, cwd: string) => Promise<string | undefined>;
-  execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<string>;
+  execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<string | ToolResult>;
 }
 
 export type TranscriptItem =

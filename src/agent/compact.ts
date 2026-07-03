@@ -22,11 +22,23 @@ VERIFY: the exact command(s) to confirm it works.
 
 Be concrete (real file paths and names from the transcript). Max ~600 words. Output only the brief.`;
 
+/** Message content → plain text; image_url parts (screenshots, pasted images)
+ *  become placeholders so base64 data URIs never leak into summarizer prompts. */
+function contentToText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (p.type === "text" ? p.text : p.type === "image_url" ? "[image]" : JSON.stringify(p)))
+      .join(" ");
+  }
+  return JSON.stringify(content);
+}
+
 /** Truncated transcript of a history, bounded so it can't overflow oneShot. */
 export function historyToTranscript(messages: ChatMessage[], perMsgCap = 2000, totalCap = 200000): string {
   let t = messages
     .map((m) => {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const content = contentToText(m.content);
       const calls =
         "tool_calls" in m && m.tool_calls
           ? m.tool_calls
@@ -101,7 +113,7 @@ export async function compact(
 
   const transcript = older
     .map((m) => {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const content = contentToText(m.content);
       const calls =
         "tool_calls" in m && m.tool_calls
           ? m.tool_calls

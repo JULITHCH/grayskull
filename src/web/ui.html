@@ -91,19 +91,23 @@ body.zen.zdrag { cursor: grabbing; user-select: none; }
   display: none; color: var(--g-dim); border: 1px solid var(--g-faint); background: var(--panel);
   padding: 4px 14px; font-size: 11px; letter-spacing: 2px; cursor: pointer; }
 body.zen #zenHint { display: block; }
-/* zen stream: the live generating text ghosting half-transparent over the ocean —
- * bottom-anchored, older lines fade out toward the top via the mask */
+/* zen stream: the live turn (thinking + answer + tool status) ghosting
+ * half-transparent over the ocean — bottom-anchored, older lines fade out
+ * toward the top via the mask. Digital look via local font stack + glow. */
 #zenStream { position: fixed; inset: 0; z-index: 55; display: none; pointer-events: none;
-  padding: 14vh 16vw; font: 13px/1.75 monospace; color: var(--g);
+  padding: 12vh 15vw; color: var(--g);
+  font: 15px/1.8 "Share Tech Mono", "OCR A Extended", "Lucida Console", "Consolas", monospace;
+  letter-spacing: .5px;
   white-space: pre-wrap; word-break: break-word; overflow: hidden;
   flex-direction: column; justify-content: flex-end;
-  opacity: .5; transition: opacity 2.5s;
-  text-shadow: 0 0 10px var(--g-faint);
+  opacity: .55; transition: opacity 2.5s;
+  text-shadow: 0 0 12px var(--g-faint), 0 0 2px var(--g-dim);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 32%, #000 86%, transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 32%, #000 86%, transparent 100%); }
 body.zen #zenStream { display: flex; }
 #zenStream.zsIdle { opacity: 0; }
 #zenStream .zsReason { color: var(--g-dim); font-style: italic; }
+#zenStream .zsWork { color: var(--g-dim); letter-spacing: 2px; margin-top: 1em; }
 /* CRT scanlines — matrix + tron + synthwave only */
 [data-theme="matrix"] body::after, [data-theme="tron"] body::after, [data-theme="synthwave"] body::after {
   content: ""; position: fixed; inset: 0; z-index: 50; pointer-events: none;
@@ -1363,17 +1367,25 @@ function renderLive() {
   zenStreamRender();
   maybeScroll();
 }
-/* zen overlay mirror of the live stream — ghost text over the memory ocean.
- * Keeps the last content on stream end and lets the CSS transition fade it. */
+/* zen overlay mirror of the live turn — thinking (dim italic), answer text and
+ * the working/tool status line, ghosted over the memory ocean. Keeps the last
+ * content on stream end and lets the CSS transition fade it. */
 function zenStreamRender() {
   if (!document.body.classList.contains("zen")) return;
   const el = $("zenStream");
-  const st = stream(S.current ?? "");
-  const reason = st.reason && !st.text ? st.reason.slice(-600) : "";
-  const text = st.text.slice(-1800);
-  if (!reason && !text) { el.classList.add("zsIdle"); return; }
+  const sid = S.current ?? "";
+  const st = stream(sid);
+  const stat = S.status[sid] ?? {};
+  const reason = (st.reason ?? "").slice(-600);
+  const text = (st.text ?? "").slice(-1800);
+  const tool = (S.transcripts[sid] ?? []).findLast((e) => e.it.type === "tool" && e.it.state === "running")?.it;
+  const work = stat.busy ? `${SPIN[spinFrame]} ${stat.what || "working"}${tool ? " — " + tool.detail : ""}…` : "";
+  if (!reason && !text && !work) { el.classList.add("zsIdle"); return; }
   el.classList.remove("zsIdle");
-  el.innerHTML = reason ? `<span class="zsReason">${esc(reason)}</span>` : esc(text);
+  el.innerHTML =
+    (reason ? `<div class="zsReason">${esc(reason)}</div>` : "") +
+    (text ? `<div>${esc(text)}</div>` : "") +
+    (work ? `<div class="zsWork">${esc(work)}</div>` : "");
 }
 function maybeScroll() {
   const t = $("transcript");

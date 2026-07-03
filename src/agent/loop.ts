@@ -218,10 +218,17 @@ export async function runToolLoop(opts: {
     // Phase B — execute. Results keyed by call id, pushed in original order so
     // every tool_call has a matching tool message (and in tool_calls order).
     const results = new Map<string, string>();
+    // images returned by tools (e.g. playwright screenshots): tool messages are
+    // text-only, so these ride a follow-up user message as image_url parts
+    const resultImages: { tool: string; urls: string[] }[] = [];
     const runExec = async (t: ExecTask): Promise<void> => {
       opts.onToolEvent?.({ ...t.item });
       try {
-        let result = await t.tool.execute(t.args, ctx);
+        const raw = await t.tool.execute(t.args, ctx);
+        let result = typeof raw === "string" ? raw : raw.text;
+        if (typeof raw !== "string" && raw.images?.length) {
+          resultImages.push({ tool: t.tool.name, urls: raw.images });
+        }
         if (t.tool.kind === "edit" && !result.startsWith("error:")) {
           const diag = runDiagnostics(ctx.cwd);
           if (diag) result += `\n\n${diag}`;
@@ -268,6 +275,23 @@ export async function runToolLoop(opts: {
     // never leave a tool_call dangling (a missing tool message 400s GLM on replay)
     for (const call of toolCalls) {
       messages.push({ role: "tool", tool_call_id: call.id, content: results.get(call.id) ?? "[interrupted]" });
+    }
+    // images from tool results (screenshots etc.) — attached on a user message
+    // because the chat API's tool role is text-only
+    if (resultImages.length > 0) {
+      const names = [...new Set(resultImages.map((r) => r.tool))].join(", ");
+      const urls = resultImages.flatMap((r) => r.urls);
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `[${urls.length} image${urls.length > 1 ? "s" : ""} returned by ${names} above, attached here — inspect visually before continuing.]`,
+          },
+          ...urls.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+        ],
+      });
+      ctx.note(`🖼 ${urls.length} image${urls.length > 1 ? "s" : ""} from ${names} → attached for the model`);
     }
   }
   if (ranOut) {
