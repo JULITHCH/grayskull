@@ -12,6 +12,46 @@ thinking chains, image input (pasted *and* from tool results — the agent sees 
 Playwright screenshots), scheduled unattended workers, live model switching, a
 matrix-style web UI with zen mode, and aggressive context hygiene.
 
+## What makes GRAYSKULL different
+
+Most agent CLIs are thin wrappers around a frontier model — the model is smart, the
+harness stays out of the way. GRAYSKULL is the opposite bet: **a mid-size local model
+plus a harness that compensates mechanically.** Everything below exists because a
+35B–122B model running on your own box needs it — and it's yours, on your hardware,
+with zero cloud dependency:
+
+- **Memory that behaves like memory.** Two tiers (global vault + per-project),
+  auto-distilled after every turn, scored with ACT-R-style activation: memories decay
+  exponentially, get reinforced when they fire, spread activation to similar neighbors,
+  and are pruned to an archive they can be revived from. Pure code, no LLM in the loop —
+  and you can *watch it learn* as a living node graph in the web UI.
+- **It notices when it's stuck.** Ten edits without a fix, or you report the same bug
+  twice → it stops guessing and researches the problem online. Weak models loop;
+  GRAYSKULL breaks the loop mechanically.
+- **It sees its own screenshots.** Playwright screenshots come back as real images to
+  the vision model — the agent looks at the rendered page, not just the DOM.
+- **Compilers as guardrails.** Every edit triggers the project's typecheck; failures are
+  injected straight into the tool result so the model fixes its own breakage in the same
+  turn. LSP navigation and current library docs (context7) are always on.
+- **Tool-call repair.** Malformed calls, tool calls leaked as text, dialect quirks
+  (Qwen JSON vs GLM XML) — validated, recovered, retried with targeted error messages
+  instead of dying.
+- **Context that survives itself.** At 70% full the agent writes its own continuation
+  brief, wipes the window, and keeps working — mid-turn if needed. Long tasks don't
+  drown in their own history.
+- **An always-on control room.** grayskull-web: multiple live sessions, agent-mesh and
+  memory graphs, scheduled unattended workers (post to LinkedIn weekly, watch a feed) —
+  and every terminal session auto-joins the hub, steerable from the browser. Plus zen
+  mode: GUI fades, the memory ocean rotates, the live thinking ghosts over it, ambient
+  audio on. Your agent as an aquarium.
+- **Composable thinking.** `/thinkingchain plan -> code -> review` — user-defined step
+  pipelines with PASS/FAIL gates that jump back on failure, per-step sampling presets,
+  shared or fresh context.
+- **KAMIKAZEEE mode.** Fully unattended: never stops at iteration caps, auto-answers
+  its own questions. Shift+tab, red-alert theme, matrix rain. You were warned.
+
+One TypeScript codebase, one Bun binary, no cloud, no telemetry, no subscription.
+
 ---
 
 ## Quick start
