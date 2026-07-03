@@ -246,6 +246,24 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
   padding: 8px 10px; font-family: inherit; font-size: 13px; outline: none; resize: none;
   min-height: 36px; max-height: 160px; line-height: 1.45; }
 #promptInput:focus { box-shadow: 0 0 10px var(--glow); }
+/* temperature slider — live sampling override, right before SEND */
+#tempCtl { display: flex; align-items: center; gap: 6px; position: relative;
+  align-self: center; padding-bottom: 2px; }
+#tempVal { color: var(--g-dim); font-size: 11px; min-width: 26px; text-align: right; }
+#tempSlider { -webkit-appearance: none; appearance: none; width: 90px; height: 3px;
+  background: var(--g-faint); outline: none; cursor: pointer; }
+#tempSlider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 11px; height: 11px; background: var(--g); border: 1px solid var(--g-dim);
+  cursor: grab; box-shadow: 0 0 6px var(--glow); }
+#tempSlider::-moz-range-thumb { width: 11px; height: 11px; border-radius: 0;
+  background: var(--g); border: 1px solid var(--g-dim); cursor: grab;
+  box-shadow: 0 0 6px var(--glow); }
+#tempTip { position: absolute; bottom: calc(100% + 10px); right: 0; width: 210px;
+  display: none; z-index: 25; pointer-events: none;
+  border: 1px solid var(--g-dim); background: var(--modal-bg); color: var(--g-dim);
+  padding: 6px 9px; font-size: 11px; line-height: 1.5; }
+#tempTip b { color: var(--g); font-weight: 400; }
+#tempCtl.tipOn #tempTip { display: block; }
 #slashMenu { position: absolute; bottom: 100%; left: 8px; right: 8px; max-height: 220px; overflow-y: auto;
   border: 1px solid var(--g-dim); background: var(--modal-bg); z-index: 20; display: none; }
 #slashMenu .sm-row { padding: 4px 10px; cursor: pointer; font-size: 12px; color: var(--g-dim); }
@@ -453,6 +471,11 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
     <div id="inputBar">
       <div id="slashMenu"></div>
       <textarea id="promptInput" rows="1" placeholder="command the power of grayskull…  (shift+enter = newline · paste/drop image)"></textarea>
+      <div id="tempCtl" title="sampling temperature — applies to the next model request">
+        <div id="tempTip"></div>
+        <span id="tempVal">0.7</span>
+        <input type="range" id="tempSlider" min="0" max="2" step="0.05" value="0.7">
+      </div>
       <button class="btn" id="sendBtn">SEND</button>
       <button class="btn danger" id="stopBtn" title="interrupt the running task (esc)">ABORT</button>
     </div>
@@ -1458,6 +1481,36 @@ function renderSlash() {
 }
 function pickSlash(c) { $("promptInput").value = c + " "; hideSlash(); $("promptInput").focus(); }
 function hideSlash() { $("slashMenu").style.display = "none"; slashSel = 0; }
+/* ─── temperature slider: live sampling override, applies to the next request.
+ * Tooltip above the slider explains the behavior at the current value while
+ * moving; the set value is sent on release and synced back via status. */
+const TEMP_BANDS = [
+  [0.3, "<b>deterministic</b> — near-greedy, repeatable. Precise edits, refactors, exact formats."],
+  [0.6, "<b>focused</b> — low variance, stays on rails. Factual answers, code fixes."],
+  [0.9, "<b>balanced</b> — the Qwen coding preset (0.7) lives here. Good default for agent work."],
+  [1.3, "<b>creative</b> — more diverse ideas and phrasing. Brainstorming, writing."],
+  [9, "<b>wild</b> — high entropy: surprising output, but tool calls and JSON may derail."],
+];
+let tempDrag = false, tempTipTimer = 0;
+function tempTipHtml(v) {
+  const band = TEMP_BANDS.find(([max]) => v < max) ?? TEMP_BANDS[TEMP_BANDS.length - 1];
+  return `<b>${v.toFixed(2)}</b> ${band[1]}`;
+}
+$("tempSlider").oninput = () => {
+  const v = +$("tempSlider").value;
+  $("tempVal").textContent = v.toFixed(2);
+  $("tempTip").innerHTML = tempTipHtml(v);
+  $("tempCtl").classList.add("tipOn");
+  clearTimeout(tempTipTimer);
+  tempTipTimer = setTimeout(() => $("tempCtl").classList.remove("tipOn"), 1800);
+};
+$("tempSlider").onpointerdown = () => { tempDrag = true; };
+$("tempSlider").onpointerup = () => { tempDrag = false; };
+$("tempSlider").onchange = () => {
+  tempDrag = false;
+  if (S.current) send({ t: "temp", sid: S.current, value: +$("tempSlider").value });
+};
+
 $("promptInput").addEventListener("input", () => { autoGrow(); renderSlash(); });
 $("promptInput").addEventListener("keydown", (e) => {
   const inp = $("promptInput");
@@ -1590,6 +1643,10 @@ function renderStatus() {
   $("ctxFill").style.background = (st.ctxPct ?? 0) > 70 ? "var(--amber)" : "var(--g-dim)";
   $("ctxTxt").textContent = "ctx " + (st.ctxPct ?? 0) + "%";
   $("tpsTxt").textContent = st.tps ? st.tps + " tok/s" : "";
+  if (typeof st.temp === "number" && !tempDrag) {
+    $("tempSlider").value = st.temp;
+    $("tempVal").textContent = st.temp.toFixed(2);
+  }
   $("tokTxt").textContent = st.tokens ? "Σ " + fmtTok(st.tokens) + " tok" : "";
   renderBusyTxt();
   document.querySelectorAll(".modeBtn").forEach((b) => b.classList.toggle("active", b.dataset.mode === st.mode));

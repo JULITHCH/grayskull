@@ -245,6 +245,9 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "interrupt":
         session?.interrupt();
         break;
+      case "temp":
+        session?.setTemperature(Number(msg["value"]));
+        break;
       case "chain_save":
         session?.chainSave((msg["def"] as Record<string, unknown>) ?? {});
         break;

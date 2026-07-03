@@ -440,6 +440,10 @@ WebSockets, zero frontend build):
   memories. TEXT toggle for the flat view. Updates after every turn — watch it learn
 - **CHAIN // TODO panel** — running thinking chains as a live pipeline (steps light up,
   ⛩ gates dashed, retries flash red) + the model's todo list with a progress bar
+- **temperature slider** next to SEND — change sampling temperature on the go
+  (0–2, applies to the next model request, works for CLI-linked sessions too).
+  While you drag, a tooltip above the slider explains the behavior at that value:
+  deterministic → focused → balanced (Qwen preset 0.7) → creative → wild
 - **slash commands work in web sessions** too (`/tc`, `/memory`, `/compact`, …);
   editor/picker commands stay terminal-only
 - permission and ask_user requests pop as modals (y/a/n keys work)

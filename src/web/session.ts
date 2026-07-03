@@ -240,6 +240,7 @@ export class WebSession {
       tps: Math.round(this.client.lastTokensPerSec),
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: this.settings.model,
+      temp: this.settings.temperature,
       thinking: this.settings.enableThinking,
       legendary: this.agent.legendary,
       todo: this.todoState.items,
@@ -415,6 +416,19 @@ export class WebSession {
         this.send({ t: "item", item });
       }
     }
+  }
+
+  /** Live sampling-temperature override from the browser slider; applies to
+   *  the next model request (LlmClient reads settings per call). */
+  setTemperature(value: number): void {
+    if (!Number.isFinite(value)) return;
+    const v = Math.round(Math.max(0, Math.min(2, value)) * 100) / 100;
+    if (v === this.settings.temperature) return;
+    this.settings.temperature = v;
+    const item: TranscriptItem = { type: "note", text: `🌡 temperature → ${v}` };
+    this.items.push(item);
+    this.send({ t: "item", item });
+    this.sendStatus();
   }
 
   interrupt(): void {

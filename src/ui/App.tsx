@@ -220,6 +220,7 @@ export function App(props: AppProps): React.ReactElement {
       tps: Math.round(client.lastTokensPerSec),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
       model: settings.model,
+      temp: settings.temperature,
       thinking: settings.enableThinking,
       legendary: agent.legendary,
       todo: todoState.items,
@@ -361,6 +362,15 @@ export function App(props: AppProps): React.ReactElement {
           case "interrupt":
             agent.stop();
             break;
+          case "temp": {
+            const v = Number(msg["value"]);
+            if (Number.isFinite(v)) {
+              settings.temperature = Math.round(Math.max(0, Math.min(2, v)) * 100) / 100;
+              pushItem({ type: "note", text: `⇄ temperature → ${settings.temperature} (from web)` });
+              publishStatus();
+            }
+            break;
+          }
           case "answer": {
             const reqId = String(msg["reqId"] ?? "");
             const value = String(msg["value"] ?? "");
