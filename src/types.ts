@@ -74,6 +74,6 @@ export interface AgentDef {
   /** tool names this agent may use; defaults to read-only set */
   tools: string[];
   systemPrompt: string;
-  scope: "global" | "local";
+  scope: "global" | "local" | "builtin";
   filePath: string;
 }

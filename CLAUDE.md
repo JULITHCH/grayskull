@@ -54,7 +54,9 @@ rendered dimmed, never scanned for tool calls.
 - `mcp/manager.ts` — official MCP SDK; searxng (`npx -y mcp-searxng`, SEARXNG_URL
   :8080) is a built-in always-on default merged in `config/settings.ts`.
 - `agents/` — sub-agent defs as frontmatter-md in `.grayskull/agents/` + global dir;
-  `create_agent` / `spawn_agent` tools (semaphore-capped, depth 1).
+  `create_agent` / `spawn_agent` tools (semaphore-capped, depth 1). Built-ins
+  `explorer` / `reviewer` (registry.ts BUILTIN_AGENTS, read-only, shadowable by
+  same-name defs); system prompt pushes proactive delegation.
 - `skills/` — Claude Code-compatible SKILL.md discovery (incl. ~/.claude/skills and the
   plugin cache); exposed as the `skill` tool + `/<name>` slash fallback. Frontmatter
   parser handles YAML block scalars (`description: >`).

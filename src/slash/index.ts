@@ -291,10 +291,17 @@ export const COMMANDS: SlashCommand[] = [
       if (parts[0] === "edit" && parts[1]) {
         const def = agents.find((a) => a.name === parts[1]);
         if (!def) return note(ctx, `no agent named ${parts[1]}`);
+        if (def.scope === "builtin") {
+          return note(ctx, `${def.name} is built-in — create a local agent with the same name to override it`);
+        }
         openInEditor(def.filePath, ctx.settings.editor);
         return note(ctx, `edited ${def.filePath}`);
       }
       if (parts[0] === "delete" && parts[1]) {
+        const def = agents.find((a) => a.name === parts[1]);
+        if (def?.scope === "builtin") {
+          return note(ctx, `${def.name} is built-in and cannot be deleted`);
+        }
         return note(ctx, deleteAgentDef(ctx.cwd, parts[1]) ? `deleted agent ${parts[1]}` : `no agent named ${parts[1]}`);
       }
       if (agents.length === 0) {

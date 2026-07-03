@@ -65,7 +65,7 @@ export function registerAgentTools(opts: {
   const createAgentTool: ToolDef = {
     name: "create_agent",
     description:
-      "Create a reusable sub-agent definition. Use when the user asks for an agent (e.g. 'create an agent that checks for spelling mistakes'). After creating it, use spawn_agent to run it.",
+      "Create a reusable sub-agent definition. Use whenever a task needs a focused specialist that no existing agent covers (see 'Available sub-agents') — not only when the user asks for one. After creating it, use spawn_agent to run it.",
     kind: "edit",
     schema: createSchema,
     describeCall: (args) => `create_agent(${String(args["name"] ?? "")})`,
@@ -90,7 +90,7 @@ export function registerAgentTools(opts: {
   const spawnAgentTool: ToolDef = {
     name: "spawn_agent",
     description:
-      "Run a sub-agent on a task in a fresh context; returns its final report. For 'iterate over all modules' style work, call spawn_agent once per file/module (multiple calls in one response run concurrently).",
+      "Run a sub-agent on a task in a fresh context; returns its final report. Delegate proactively whenever work splits into independent chunks or would flood your context: broad searches (explorer), per-module audits (reviewer), repetitive per-file work. Call spawn_agent once per chunk — multiple calls in one response run concurrently.",
     kind: "execute",
     schema: spawnSchema,
     describeCall: (args) => `spawn_agent(${String(args["agent"] ?? "")}: ${String(args["task"] ?? "").slice(0, 50)})`,

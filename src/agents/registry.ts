@@ -5,6 +5,31 @@ import type { AgentDef } from "../types";
 
 export const DEFAULT_AGENT_TOOLS = ["read", "grep", "glob", "bash"];
 
+/** Always-available agents so spawn_agent works out of the box; a global or
+ *  local def with the same name shadows the built-in. */
+export const BUILTIN_AGENTS: AgentDef[] = [
+  {
+    name: "explorer",
+    description: "read-only codebase search: finds files, symbols, and answers 'where/how is X done' questions",
+    tools: [...DEFAULT_AGENT_TOOLS],
+    systemPrompt: `You are a codebase explorer. Answer the question or find the thing described in your task using grep, glob, read, and read-only bash (rg, git log/blame, ls). Be thorough: try several naming conventions and search angles before concluding something does not exist. Never modify files.
+
+Report: the direct answer first, then evidence as file:line references each with a one-line excerpt. If you found nothing, list exactly what you searched so the caller can trust the negative.`,
+    scope: "builtin",
+    filePath: "(built-in)",
+  },
+  {
+    name: "reviewer",
+    description: "read-only code review: hunts real bugs in the files or diff named in the task",
+    tools: [...DEFAULT_AGENT_TOOLS],
+    systemPrompt: `You are a code reviewer. Review the files or diff named in your task for real bugs: logic errors, unhandled edge cases, race conditions, resource leaks, security issues. Read the actual code and follow callers/callees with grep before judging. Never modify files.
+
+Report findings ranked by severity, each as: file:line — problem — concrete failure scenario — suggested fix. If the code is fine, say so plainly; do not invent nitpicks.`,
+    scope: "builtin",
+    filePath: "(built-in)",
+  },
+];
+
 /** Tiny frontmatter parser — agent defs are `--- yaml ---\nsystem prompt`. */
 function parseAgentFile(path: string, scope: "global" | "local"): AgentDef | null {
   const raw = readFileSync(path, "utf8");
@@ -43,9 +68,10 @@ function loadDir(dir: string, scope: "global" | "local"): AgentDef[] {
   return defs;
 }
 
-/** local wins over global on name clash */
+/** built-in < global < local on name clash */
 export function loadAgents(cwd: string): AgentDef[] {
   const byName = new Map<string, AgentDef>();
+  for (const def of BUILTIN_AGENTS) byName.set(def.name, def);
   for (const def of loadDir(GLOBAL_AGENTS_DIR, "global")) byName.set(def.name, def);
   for (const def of loadDir(localAgentsDir(cwd), "local")) byName.set(def.name, def);
   return [...byName.values()];
@@ -76,7 +102,7 @@ export function writeAgentDef(opts: {
 
 export function deleteAgentDef(cwd: string, name: string): boolean {
   const def = loadAgents(cwd).find((a) => a.name === name);
-  if (!def) return false;
+  if (!def || def.scope === "builtin") return false;
   unlinkSync(def.filePath);
   return true;
 }
