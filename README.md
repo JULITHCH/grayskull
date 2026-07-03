@@ -28,6 +28,11 @@ with zero cloud dependency:
 - **It notices when it's stuck.** Ten edits without a fix, or you report the same bug
   twice → it stops guessing and researches the problem online. Weak models loop;
   GRAYSKULL breaks the loop mechanically.
+- **Thinking chains — structured reasoning you compose.** `/thinkingchain plan -> code
+  -> review` runs user-defined step pipelines with PASS/FAIL gates that jump back on
+  failure, per-step sampling presets (creative planning, precise coding), shared or
+  fresh context per step. A weak model following a good process beats a weak model
+  winging it.
 - **It sees its own screenshots.** Playwright screenshots come back as real images to
   the vision model — the agent looks at the rendered page, not just the DOM.
 - **Compilers as guardrails.** Every edit triggers the project's typecheck; failures are
@@ -44,9 +49,6 @@ with zero cloud dependency:
   and every terminal session auto-joins the hub, steerable from the browser. Plus zen
   mode: GUI fades, the memory ocean rotates, the live thinking ghosts over it, ambient
   audio on. Your agent as an aquarium.
-- **Composable thinking.** `/thinkingchain plan -> code -> review` — user-defined step
-  pipelines with PASS/FAIL gates that jump back on failure, per-step sampling presets,
-  shared or fresh context.
 - **KAMIKAZEEE mode.** Fully unattended: never stops at iteration caps, auto-answers
   its own questions. Shift+tab, red-alert theme, matrix rain. You were warned.
 
