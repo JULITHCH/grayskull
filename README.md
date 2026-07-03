@@ -218,6 +218,26 @@ maxTokens / globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
 (set `"replaceSystemPrompt": true` in local settings to replace instead).
 
+## /setup — endpoints & service health
+
+`/setup` opens a keyboard-driven dialog in the terminal (↑↓ select, enter edit,
+esc close) instead of hand-editing JSON:
+
+- **Endpoints, applied live** — LLM baseURL / model / apiKeyEnv (shows whether the
+  env var is actually set) / context window, the searxng URL, and every `/model`
+  preset's baseURL. Committing a field takes effect immediately (the client
+  reconnects, searxng's MCP bridge restarts) — no restart. `s` persists the edited
+  fields into the global `settings.json` (only what you changed is written).
+- **Service health** — live status for **searxng**, **context7**, **lsp-ts** and
+  **playwright**: MCP bridge state, tool counts, and real checks behind them — the
+  searxng *instance* is probed over HTTP (the bridge connects happily while the
+  instance is down), the lsp binaries (`mcp-language-server`,
+  `typescript-language-server`) are looked up on disk/PATH, playwright's config
+  presence is verified. Anything missing or failed shows concrete fix instructions
+  inline (the `docker run` for searxng, the `go install`/`npm i -g` lines for LSP,
+  the settings snippet for playwright). `r` reconnects failed servers and re-runs
+  all checks.
+
 ## Web search + fetch (always on)
 
 searxng on `:8080`, bridged through the `mcp-searxng` stdio MCP server — a built-in
@@ -292,6 +312,12 @@ combining the text checks with visual ones:
 
 ## Sub-agents + auto agent creation
 
+Two agents ship built in and are always available: **explorer** (read-only fan-out
+search — "where is X handled?") and **reviewer** (read-only bug hunt over files or a
+diff). The system prompt pushes the model to delegate *proactively*: broad multi-file
+searches, per-module audits, or the same check applied to many files fan out as one
+`spawn_agent` call per chunk instead of flooding the main context.
+
 Say: *"create an agent that checks for spelling mistakes. iterate through all modules"* —
 the model calls `create_agent` (definition saved to `.grayskull/agents/spell-checker.md`,
 shown for approval outside KAMIKAZEEE), then fans out `spawn_agent` once per module.
@@ -299,8 +325,9 @@ Spawns run concurrently (capped by `agentConcurrency`, default 2 — vLLM batche
 each in a fresh context; only the final reports return to your conversation.
 
 Agent definitions are markdown + frontmatter (`name`, `description`, `tools`), global in
-`~/.config/grayskull/agents/` or per-project in `.grayskull/agents/` (local wins).
-Sub-agents can't spawn sub-agents and can't ask you questions.
+`~/.config/grayskull/agents/` or per-project in `.grayskull/agents/` (local wins over
+global; a def named `explorer`/`reviewer` shadows the built-in). Sub-agents can't spawn
+sub-agents and can't ask you questions.
 
 ```
 /agents                 # list
@@ -424,8 +451,9 @@ WebSockets, zero frontend build):
 - **multiple live sessions** — left panel; each runs a full agent (own cwd, settings,
   memory, MCP, permissions), create more with + NEW SESSION
 - **chat** with token streaming, dimmed reasoning stream, colorized diffs, tool cards,
-  a `⠋ thinking…` spinner whenever the session is busy (so it never looks frozen mid-think),
-  and `↑`/`↓` prompt history
+  a `⠋` busy spinner with a random He-Man quip per turn ("Battle Cat is warming up",
+  "Skeletor is NOT going to like this" — edit them in `src/ui/quips.ts`) so it never
+  looks frozen mid-think, and `↑`/`↓` prompt history
 - **paste or drag-drop images** straight into the prompt — they're sent to the
   vision-capable model and rendered inline in the conversation. (This is the clean way to
   get a local screenshot into a remote SSH/tmux session: forward `:4242` and paste in the
@@ -519,6 +547,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/help` | commands + keys |
 | `/init` | explore the project, ask questions, seed project memory |
 | `/system [local]` | edit system prompt in `$EDITOR` |
+| `/setup` | dialog: configure endpoints live + searxng/context7/lsp/playwright health |
 | `/settings [local]` | edit settings.json |
 | `/memory [edit [global]]` | show / edit memories |
 | `/remember <fact>` | save to the global vault |
