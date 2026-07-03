@@ -218,16 +218,30 @@ maxTokens / globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
 (set `"replaceSystemPrompt": true` in local settings to replace instead).
 
-## /setup — endpoints & service health
+## /setup — endpoints, LLM presets & service health
 
-`/setup` opens a keyboard-driven dialog in the terminal (↑↓ select, enter edit,
-esc close) instead of hand-editing JSON:
+`/setup` opens a setup dialog instead of hand-editing JSON — keyboard-driven in the
+terminal (↑↓ select, enter edit, esc close), a modal in the web UI (same data, same
+live behavior):
 
-- **Endpoints, applied live** — LLM baseURL / model / apiKeyEnv (shows whether the
-  env var is actually set) / context window, the searxng URL, and every `/model`
-  preset's baseURL. Committing a field takes effect immediately (the client
-  reconnects, searxng's MCP bridge restarts) — no restart. `s` persists the edited
-  fields into the global `settings.json` (only what you changed is written).
+- **Full LLM configs, grouped** — the ACTIVE MODEL section and one section per
+  `/model` preset, each with the complete stack: **family** (qwen3.5/glm4.5 —
+  selects the tool-call format and thinking presets), **endpoint**, **model id**,
+  **api key env** (shows whether the env var is actually set), context window,
+  max output tokens, temperature/top_p/top_k, thinking on/off. Field types are
+  real: enums cycle (dropdowns in the web), toggles flip, numbers validate.
+- **Applied live** — committing an ACTIVE MODEL field takes effect immediately
+  (endpoint/key changes reconnect the client, the searxng URL restarts its MCP
+  bridge) — no restart. `s` (or SAVE in the web) persists the edited fields into
+  the global `settings.json` (only what you changed is written).
+- **Add / remove LLMs** — `a` adds one (cloned from the active stack, then adjust
+  family/endpoint/model id per field), `x` removes the selected one; in the web
+  modal use + ADD LLM and ✕ REMOVE per section. Grayskull's seeded defaults
+  (qwen35, glm, …) are removable too: saving writes the whole preset list to
+  `settings.json`, which then owns it — deleted defaults stay gone across restarts.
+- **Extendable** — the fields of an LLM are one spec table in `src/setup/core.ts`
+  (`PRESET_SPEC`/`ACTIVE_SPEC`); adding an entry there surfaces it in the TUI
+  dialog, the web modal and persistence automatically.
 - **Service health** — live status for **searxng**, **context7**, **lsp-ts** and
   **playwright**: MCP bridge state, tool counts, and real checks behind them — the
   searxng *instance* is probed over HTTP (the bridge connects happily while the
@@ -547,7 +561,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/help` | commands + keys |
 | `/init` | explore the project, ask questions, seed project memory |
 | `/system [local]` | edit system prompt in `$EDITOR` |
-| `/setup` | dialog: configure endpoints live + searxng/context7/lsp/playwright health |
+| `/setup` | dialog (TUI + web): endpoints live, add/remove LLM presets, service health |
 | `/settings [local]` | edit settings.json |
 | `/memory [edit [global]]` | show / edit memories |
 | `/remember <fact>` | save to the global vault |

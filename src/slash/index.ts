@@ -49,7 +49,7 @@ export interface CommandContext {
   push: (item: TranscriptItem) => void;
   setMode: (mode: PermissionMode) => void;
   clearTranscript: () => void;
-  /** open the /setup dialog (terminal UI only; absent in web sessions) */
+  /** open the /setup dialog (Ink dialog in the TUI, modal in web sessions) */
   openSetup?: () => void;
   exit: () => void;
 }
@@ -91,10 +91,10 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "setup",
-    description: "setup dialog: configure endpoints, check searxng/context7/lsp/playwright",
+    description: "setup dialog: endpoints + LLM presets, check searxng/context7/lsp/playwright",
     run: async (ctx) => {
       if (!ctx.openSetup) {
-        return note(ctx, "/setup is a terminal dialog — run it in the CLI session");
+        return note(ctx, "/setup needs an interactive UI — run it in the terminal or the web UI");
       }
       ctx.openSetup();
     },

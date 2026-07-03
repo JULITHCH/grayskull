@@ -80,10 +80,16 @@ rendered dimmed, never scanned for tool calls.
   via browser_evaluate → screenshots for the human).
 - `ui/App.tsx` — single-file Ink UI (transcript, custom input, permission/ask prompts,
   statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf. `ui/setup.tsx` —
-  /setup dialog: edit endpoints in place (live-applied via `client.reconfigure` /
-  `mcp.reconnect`, saved as patches to global settings.json) + install/health checks
-  for searxng (instance probed via fetch), context7, lsp-ts, playwright with fix
-  instructions; opened through `CommandContext.openSetup` (TUI only).
+  /setup Ink dialog; the UI-agnostic logic lives in `setup/core.ts` and is
+  schema-driven: `PRESET_SPEC`/`ACTIVE_SPEC` field tables (kind text/number/
+  enum/toggle) define what an LLM is — extend there and TUI + web modal +
+  persistence pick it up. listGroups (active + per-preset + websearch groups),
+  applyField (typed coercion, live via `client.reconfigure`/`mcp.reconnect`),
+  addPreset/removePreset (models record saved whole so deleted seeded defaults
+  stay gone), saveGlobal (patches raw global settings.json), checkServices
+  (searxng probed over HTTP, lsp binaries, playwright config + fix
+  instructions). Web modal: session.ts setup* methods, `setup_*` WS messages.
+  Opened through `CommandContext.openSetup` (set by both TUI App and WebSession).
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
   via `with {type:"text"}`; `session.ts` WebSession wraps GrayskullAgent with a WS
   bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask

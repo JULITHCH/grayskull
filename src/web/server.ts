@@ -210,7 +210,11 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       const result = manager.create(cwd, Boolean(msg["create"]), kind);
       if ("needsCreate" in result) ws.send(JSON.stringify({ t: "confirm_create", cwd: result.needsCreate }));
       else if ("error" in result) broadcast({ t: "error", text: result.error });
-      else broadcastSessions();
+      else {
+        broadcastSessions();
+        // focus the fresh session in the creating browser
+        ws.send(JSON.stringify({ t: "sess_select", sid: result.sid }));
+      }
       return;
     }
     if (msg["t"] === "resume_session") {
@@ -250,6 +254,24 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         break;
       case "chain_save":
         session?.chainSave((msg["def"] as Record<string, unknown>) ?? {});
+        break;
+      case "setup_open":
+        void session?.setupOpen();
+        break;
+      case "setup_apply":
+        session?.setupApply(String(msg["id"] ?? ""), String(msg["value"] ?? ""));
+        break;
+      case "setup_preset_add":
+        session?.setupPresetAdd(String(msg["name"] ?? ""));
+        break;
+      case "setup_preset_remove":
+        session?.setupPresetRemove(String(msg["name"] ?? ""));
+        break;
+      case "setup_save":
+        session?.setupSave(msg["ids"]);
+        break;
+      case "setup_recheck":
+        void session?.setupRecheck();
         break;
       case "close_session":
         manager.close(sid);

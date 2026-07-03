@@ -585,6 +585,19 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   </div>
 </div></div>
 
+<div class="modal-bg" id="setupModalBg"><div class="modal" style="width:min(760px,94vw)">
+  <h3>⚙ SETUP</h3>
+  <div class="body jobForm" id="setupBody" style="white-space:normal"></div>
+  <div class="actions">
+    <span id="setupDirtyChip" style="color:var(--amber);font-size:11px;align-self:center"></span>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="setupAddPreset()">+ ADD LLM</button>
+    <button class="btn" onclick="setupRecheck()">↻ RECHECK</button>
+    <button class="btn" onclick="setupSave()">SAVE</button>
+    <button class="btn" onclick="closeModal('setupModalBg')">CLOSE</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="wcfgModalBg"><div class="modal" style="width:min(560px,92vw)">
   <h3 id="wcfgTitle">CONFIGURE WORKER</h3>
   <div class="body jobForm" id="wcfgBody"></div>
@@ -1003,6 +1016,7 @@ function handle(m) {
     }
     case "memory": S.memory[m.sid] = m; renderMemory(); if (m.sid === S.current) bdBuildMemory(); break;
     case "sess_title": { const s = S.sessions.find((x) => x.sid === m.sid); if (s) { s.title = m.title; renderSessions(); } break; }
+    case "sess_select": selectSession(m.sid); break;
     case "job":
       if (m.state === "start") S.runningJobs.add(m.job); else S.runningJobs.delete(m.job);
       toast(`⚙ ${m.job}: ${m.state}${m.summary ? " — " + String(m.summary).slice(0, 140) : ""}`);
@@ -1017,6 +1031,20 @@ function handle(m) {
     case "ask_req": S.pendingAsk = m; showAsk(); break;
     case "perm_done": if (S.pendingPerm?.reqId === m.reqId) { S.pendingPerm = null; closeModal("permModalBg"); } break;
     case "ask_done": if (S.pendingAsk?.reqId === m.reqId) { S.pendingAsk = null; closeModal("askModalBg"); } break;
+    case "setup_data":
+      if (m.sid === S.current) {
+        SETUP.groups = m.groups ?? []; SETUP.services = m.services ?? []; SETUP.checking = !!m.checking;
+        renderSetup(); $("setupModalBg").classList.add("open");
+      }
+      break;
+    case "setup_groups":
+      if (m.sid === S.current) {
+        SETUP.groups = m.groups ?? [];
+        if (m.bad) { SETUP.dirty.delete(m.bad); toast("setup: invalid value for " + m.bad); }
+        renderSetup();
+      }
+      break;
+    case "setup_saved": if (m.sid === S.current) { SETUP.dirty.clear(); renderSetup(); } break;
     case "chain_edit": if (!m.sid || m.sid === S.current) openChainEditor(m); break;
     case "chain_saved": closeModal("chainModalBg"); break;
     case "chain_error": toast(m.message || "chain save failed"); break;
@@ -1580,7 +1608,7 @@ addEventListener("keydown", (e) => {
     if (document.body.classList.contains("zen")) return toggleZen(false);
     if ($("paletteBg").classList.contains("open")) return closeModal("paletteBg");
     // automation dialogs close on esc instead of interrupting the session
-    for (const id of ["wcfgModalBg", "wrunModalBg", "nworkerModalBg", "jobModalBg", "jlogModalBg"]) {
+    for (const id of ["wcfgModalBg", "wrunModalBg", "nworkerModalBg", "jobModalBg", "jlogModalBg", "setupModalBg"]) {
       if ($(id).classList.contains("open")) return closeModal(id);
     }
     if (!S.pendingPerm && !S.pendingAsk && !$("chainModalBg").classList.contains("open")) interrupt();
@@ -1984,6 +2012,76 @@ $("palInput").addEventListener("keydown", (e) => {
 document.querySelectorAll(".modal-bg").forEach((m) => m.addEventListener("mousedown", (e) => {
   if (e.target === m && m.id !== "permModalBg" && m.id !== "askModalBg") closeModal(m.id);
 }));
+
+/* ═══════════ setup modal (/setup) ═══════════ */
+const SETUP = { groups: [], services: [], checking: false, dirty: new Set() };
+const escA = (s) => esc(s).replace(/"/g, "&quot;");
+function setupFieldHtml(f) {
+  const dirtyMark = SETUP.dirty.has(f.id) || (f.id.startsWith("preset.") && SETUP.dirty.has("models"))
+    ? ' <span style="color:var(--amber)">● unsaved</span>' : "";
+  let control;
+  if (f.kind === "enum") {
+    control = `<select data-fid="${escA(f.id)}" onchange="setupApplyField(this)">
+      ${(f.options || []).map((o) => `<option value="${escA(o)}"${o === f.value ? " selected" : ""}>${esc(o)}</option>`).join("")}
+    </select>`;
+  } else if (f.kind === "toggle") {
+    control = `<select data-fid="${escA(f.id)}" onchange="setupApplyField(this)">
+      <option value="off"${f.value !== "on" ? " selected" : ""}>off</option>
+      <option value="on"${f.value === "on" ? " selected" : ""}>on</option>
+    </select>`;
+  } else {
+    control = `<input style="flex:1" data-fid="${escA(f.id)}" value="${escA(f.value)}"${f.kind === "number" ? ' inputmode="decimal"' : ""} onchange="setupApplyField(this)">`;
+  }
+  return `<label>${esc(f.label)}${f.hint ? ` <span style="color:var(--g-dim)">· ${esc(f.hint)}</span>` : ""}${dirtyMark}
+    <span style="display:flex;gap:6px">${control}</span>
+  </label>`;
+}
+function renderSetup() {
+  const stColor = { connected: "var(--g)", connecting: "var(--amber)", failed: "var(--red)", inactive: "var(--g-dim)", unconfigured: "var(--g-dim)" };
+  const stIcon = { connected: "●", connecting: "◐", failed: "✗", inactive: "○", unconfigured: "○" };
+  $("setupBody").innerHTML =
+    SETUP.groups.map((g) => `
+      <div style="color:var(--g);font-weight:bold;margin:10px 0 6px;display:flex;align-items:center;gap:8px">
+        ${esc(g.title)}
+        ${g.removable ? `<button class="btn danger" style="font-size:10px;padding:1px 7px" onclick="setupRemovePreset('${escA(g.removable)}')" title="remove this LLM (defaults stay gone once saved)">✕ REMOVE</button>` : ""}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px">
+        ${g.fields.map(setupFieldHtml).join("")}
+      </div>`).join("") +
+    `<div style="color:var(--g);font-weight:bold;margin:10px 0 6px">SERVICES${SETUP.checking ? ' <span style="color:var(--g-dim);font-weight:normal">checking…</span>' : ""}</div>` +
+    SETUP.services.map((s) => `
+      <div style="margin-bottom:6px">
+        <span style="color:${stColor[s.state] || "var(--g-dim)"}">${stIcon[s.state] || "○"}</span>
+        <b>${esc(s.name)}</b> <span style="color:var(--g-dim)">${esc(s.detail)}</span>
+        ${(s.instructions || []).map((l) => `<div style="color:var(--amber);font-size:11px;margin-left:18px">↳ ${esc(l)}</div>`).join("")}
+      </div>`).join("");
+  $("setupDirtyChip").textContent = SETUP.dirty.size ? `${SETUP.dirty.size} unsaved change${SETUP.dirty.size > 1 ? "s" : ""}` : "";
+}
+function setupFieldById(id) {
+  for (const g of SETUP.groups) for (const f of g.fields) if (f.id === id) return f;
+  return null;
+}
+function setupApplyField(inp) {
+  const id = inp.dataset.fid, value = inp.value.trim();
+  const f = setupFieldById(id);
+  if (!f || value === f.value) return;
+  SETUP.dirty.add(id.startsWith("preset.") ? "models" : id);
+  send({ t: "setup_apply", sid: S.current, id, value });
+}
+function setupAddPreset() {
+  const name = prompt("name for the new LLM preset (cloned from the active stack):");
+  if (!name || !name.trim()) return;
+  SETUP.dirty.add("models");
+  send({ t: "setup_preset_add", sid: S.current, name: name.trim() });
+}
+function setupRemovePreset(name) {
+  SETUP.dirty.add("models");
+  send({ t: "setup_preset_remove", sid: S.current, name });
+}
+function setupSave() {
+  if (SETUP.dirty.size) send({ t: "setup_save", sid: S.current, ids: [...SETUP.dirty] });
+}
+function setupRecheck() { send({ t: "setup_recheck", sid: S.current }); }
 
 /* ═══════════ chain editor modal ═══════════ */
 function openChainEditor(m) {

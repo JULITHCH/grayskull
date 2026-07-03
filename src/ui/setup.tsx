@@ -1,255 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { Settings } from "../config/settings";
-import { GLOBAL_SETTINGS } from "../config/paths";
 import type { McpManager } from "../mcp/manager";
 import type { LlmClient } from "../llm/client";
+import {
+  listGroups,
+  applyField,
+  saveGlobal,
+  recheckServices,
+  addPreset,
+  removePreset,
+  type SetupField,
+  type ServiceRow,
+  type ServiceState,
+} from "../setup/core";
 
-/** /setup dialog: edit endpoints in place (applied live), check that the
- *  always-on service stack (searxng, context7, lsp-ts, playwright) is
- *  installed and running, and show install instructions when it isn't. */
-
-interface FieldRow {
-  id: string;
-  label: string;
-  get: () => string;
-  /** live-apply to the in-memory settings (persisted separately via save) */
-  apply: (v: string) => void;
-  hint?: () => string;
-}
-
-type ServiceState = "connected" | "connecting" | "failed" | "inactive" | "unconfigured";
-
-interface ServiceRow {
-  name: string;
-  state: ServiceState;
-  detail: string;
-  instructions: string[];
-}
-
-function getSearxngUrl(settings: Settings): string {
-  const cfg = settings.mcpServers["searxng"];
-  if (cfg && "command" in cfg && cfg.env?.["SEARXNG_URL"]) return cfg.env["SEARXNG_URL"];
-  return "http://127.0.0.1:8080";
-}
-
-function buildFields(
-  settings: Settings,
-  client: LlmClient,
-  mcp: McpManager,
-  onAsyncChange: () => void,
-): FieldRow[] {
-  const fields: FieldRow[] = [
-    {
-      id: "llm.baseURL",
-      label: "LLM baseURL",
-      get: () => settings.baseURL,
-      apply: (v) => {
-        settings.baseURL = v;
-        client.reconfigure();
-      },
-    },
-    {
-      id: "llm.model",
-      label: "LLM model",
-      get: () => settings.model,
-      apply: (v) => {
-        settings.model = v;
-      },
-    },
-    {
-      id: "llm.apiKeyEnv",
-      label: "LLM apiKeyEnv",
-      get: () => settings.apiKeyEnv,
-      apply: (v) => {
-        settings.apiKeyEnv = v;
-        client.reconfigure();
-      },
-      hint: () => (process.env[settings.apiKeyEnv] ? "env ✓ set" : "env ✗ NOT SET"),
-    },
-    {
-      id: "llm.contextWindow",
-      label: "context window",
-      get: () => String(settings.contextWindow),
-      apply: (v) => {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0) settings.contextWindow = Math.floor(n);
-      },
-    },
-    {
-      id: "mcp.searxng",
-      label: "searxng URL",
-      get: () => getSearxngUrl(settings),
-      apply: (v) => {
-        const cfg = settings.mcpServers["searxng"];
-        if (cfg && "command" in cfg) {
-          cfg.env = { ...cfg.env, SEARXNG_URL: v };
-          void mcp.reconnect("searxng", settings).then(onAsyncChange);
-        }
-      },
-    },
-  ];
-  for (const [name, preset] of Object.entries(settings.models)) {
-    fields.push({
-      id: `preset.${name}`,
-      label: `preset ${name}`,
-      get: () => preset.baseURL,
-      apply: (v) => {
-        preset.baseURL = v;
-      },
-      hint: () => preset.model,
-    });
-  }
-  return fields;
-}
-
-/** Persist the edited fields into the global settings.json — patch the raw
- *  file, never dump the merged Settings (that would bake built-in MCP servers
- *  and defaults into the user's file). */
-function saveGlobal(settings: Settings, dirty: Set<string>): string {
-  let raw: Record<string, unknown> = {};
-  try {
-    if (existsSync(GLOBAL_SETTINGS)) {
-      raw = JSON.parse(readFileSync(GLOBAL_SETTINGS, "utf8")) as Record<string, unknown>;
-    }
-  } catch {
-    raw = {};
-  }
-  for (const id of dirty) {
-    if (id === "llm.baseURL") raw["baseURL"] = settings.baseURL;
-    else if (id === "llm.model") raw["model"] = settings.model;
-    else if (id === "llm.apiKeyEnv") raw["apiKeyEnv"] = settings.apiKeyEnv;
-    else if (id === "llm.contextWindow") raw["contextWindow"] = settings.contextWindow;
-    else if (id === "mcp.searxng") {
-      const servers = (raw["mcpServers"] ??= {}) as Record<string, unknown>;
-      servers["searxng"] = settings.mcpServers["searxng"];
-    } else if (id.startsWith("preset.")) {
-      const name = id.slice("preset.".length);
-      const models = (raw["models"] ??= {}) as Record<string, unknown>;
-      models[name] = settings.models[name];
-    }
-  }
-  writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");
-  return GLOBAL_SETTINGS;
-}
-
-export async function checkServices(
-  settings: Settings,
-  mcp: McpManager,
-  cwd: string,
-): Promise<ServiceRow[]> {
-  const rows: ServiceRow[] = [];
-  const status = (name: string) => mcp.statuses.get(name);
-  const npx = Bun.which("npx") !== null;
-  const bridgeState = (name: string): string => {
-    const s = status(name);
-    if (!s) return "bridge not connected";
-    return s.state === "connected" ? `running · ${s.toolCount} tools` : `bridge ${s.state}`;
-  };
-
-  // searxng — the MCP bridge connects even when the instance is down, so
-  // probe the instance itself
-  {
-    const url = getSearxngUrl(settings);
-    let reachable = false;
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
-      reachable = res.status < 500;
-    } catch {
-      reachable = false;
-    }
-    const s = status("searxng");
-    const instructions: string[] = [];
-    if (!npx) instructions.push("bridge needs npx — install Node.js + npm");
-    if (!reachable) {
-      instructions.push(
-        `no SearXNG answering at ${url} — start one:`,
-        "docker run -d --name searxng --restart unless-stopped -p 8080:8080 docker.io/searxng/searxng:latest",
-        "then press r to reconnect (or edit the searxng URL above)",
-      );
-    }
-    if (s?.state === "failed" && s.error) instructions.push(`bridge error: ${s.error}`);
-    rows.push({
-      name: "searxng",
-      state: !reachable && s?.state === "connected" ? "failed" : (s?.state ?? "unconfigured"),
-      detail: `${bridgeState("searxng")} · instance ${reachable ? "reachable" : "UNREACHABLE"} @ ${url}`,
-      instructions,
-    });
-  }
-
-  // context7 — auto-installs via npx on first connect
-  {
-    const s = status("context7");
-    const instructions: string[] = [];
-    if (!npx) instructions.push("needs npx — install Node.js + npm (server auto-installs via `npx -y @upstash/context7-mcp`)");
-    if (s?.state === "failed") {
-      instructions.push(
-        `bridge error: ${s.error ?? "unknown"}`,
-        "check network access to registry.npmjs.org, then press r",
-      );
-    }
-    rows.push({
-      name: "context7",
-      state: s?.state ?? "unconfigured",
-      detail: bridgeState("context7"),
-      instructions,
-    });
-  }
-
-  // lsp-ts — needs the mcp-language-server binary + typescript-language-server,
-  // and only attaches to projects with a tsconfig.json (marker-file gate)
-  {
-    const bin = join(homedir(), "go", "bin", "mcp-language-server");
-    const haveBin = existsSync(bin);
-    const haveTls = Bun.which("typescript-language-server") !== null;
-    const gated = !existsSync(join(cwd, "tsconfig.json"));
-    const s = status("lsp-ts");
-    const instructions: string[] = [];
-    if (!haveBin) instructions.push("install the MCP bridge: go install github.com/isaacphi/mcp-language-server@latest");
-    if (!haveTls) instructions.push("install the server: npm i -g typescript-language-server typescript");
-    if (gated) instructions.push("inactive here: only connects in projects with a tsconfig.json");
-    if (s?.state === "failed" && s.error) instructions.push(`bridge error: ${s.error}`);
-    rows.push({
-      name: "lsp-ts",
-      state: s?.state ?? "inactive",
-      detail: `${s ? bridgeState("lsp-ts") : gated ? "inactive (no tsconfig.json)" : "not connected"} · binary ${haveBin ? "✓" : "missing"} · typescript-language-server ${haveTls ? "✓" : "missing"}`,
-      instructions,
-    });
-  }
-
-  // playwright — seeded in the global settings.json, not a built-in
-  {
-    const cfg = settings.mcpServers["playwright"];
-    const s = status("playwright");
-    const instructions: string[] = [];
-    if (!cfg) {
-      instructions.push(
-        "not configured — add to ~/.config/grayskull/settings.json:",
-        '"mcpServers": { "playwright": { "command": "npx",',
-        '  "args": ["-y", "@playwright/mcp@latest", "--browser", "chrome", "--headless"] } }',
-        "then restart grayskull",
-      );
-    }
-    if (cfg && !npx) instructions.push("needs npx — install Node.js + npm");
-    if (s?.state === "failed") {
-      instructions.push(
-        `bridge error: ${s.error ?? "unknown"}`,
-        "if the browser is missing: npx playwright install chrome — then press r",
-      );
-    }
-    rows.push({
-      name: "playwright",
-      state: s?.state ?? (cfg ? "inactive" : "unconfigured"),
-      detail: cfg ? bridgeState("playwright") : "not configured",
-      instructions,
-    });
-  }
-
-  return rows;
-}
+/** /setup dialog (terminal): renders the shared schema-driven setup core —
+ *  grouped LLM configs (active + presets) edited in place, service health
+ *  with fix instructions. Field kinds: text/number edit inline, enum cycles
+ *  its options, toggle flips. */
 
 const STATE_ICON: Record<ServiceState, { icon: string; color: string }> = {
   connected: { icon: "●", color: "green" },
@@ -258,6 +27,10 @@ const STATE_ICON: Record<ServiceState, { icon: string; color: string }> = {
   inactive: { icon: "○", color: "gray" },
   unconfigured: { icon: "○", color: "gray" },
 };
+
+type Row =
+  | { type: "header"; title: string; removable?: string }
+  | { type: "field"; field: SetupField; removable?: string };
 
 export interface SetupDialogProps {
   cwd: string;
@@ -272,8 +45,10 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
   const { cwd, settings, mcp, client, onNote, onClose } = props;
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [checking, setChecking] = useState(true);
-  const [sel, setSel] = useState(0);
+  const [sel, setSel] = useState(1); // 0 is the first header
   const [editing, setEditing] = useState(false);
+  /** editing a new preset's name instead of the selected field's value */
+  const [adding, setAdding] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [editCur, setEditCur] = useState(0);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
@@ -281,11 +56,7 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
 
   const recheck = async (reconnectFailed: boolean): Promise<void> => {
     setChecking(true);
-    if (reconnectFailed) {
-      const failed = [...mcp.statuses.values()].filter((s) => s.state === "failed").map((s) => s.name);
-      await Promise.allSettled(failed.map((n) => mcp.reconnect(n, settings)));
-    }
-    const rows = await checkServices(settings, mcp, cwd);
+    const rows = await recheckServices(settings, mcp, cwd, reconnectFailed);
     if (!aliveRef.current) return;
     setServices(rows);
     setChecking(false);
@@ -298,37 +69,76 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
     };
   }, []);
 
-  const fields = buildFields(settings, client, mcp, () => {
-    if (aliveRef.current) void recheck(false);
-  });
+  const rows: Row[] = [];
+  for (const g of listGroups(settings)) {
+    rows.push({ type: "header", title: g.title, ...(g.removable ? { removable: g.removable } : {}) });
+    for (const f of g.fields) {
+      rows.push({ type: "field", field: f, ...(g.removable ? { removable: g.removable } : {}) });
+    }
+  }
 
-  const startEdit = () => {
-    const f = fields[sel];
-    if (!f) return;
-    const v = f.get();
-    setEditValue(v);
-    setEditCur(v.length);
+  const move = (dir: 1 | -1) => {
+    let i = sel;
+    do {
+      i += dir;
+    } while (i >= 0 && i < rows.length && rows[i]!.type !== "field");
+    if (i >= 0 && i < rows.length) setSel(i);
+  };
+
+  const markDirty = (id: string) =>
+    setDirty((prev) => new Set(prev).add(id.startsWith("preset.") ? "models" : id));
+
+  const apply = (field: SetupField, value: string) => {
+    const ok = applyField(field.id, value, {
+      settings,
+      client,
+      mcp,
+      onAsyncChange: () => {
+        if (aliveRef.current) void recheck(false);
+      },
+    });
+    if (ok) markDirty(field.id);
+    else onNote(`setup: invalid value for ${field.label}`);
+  };
+
+  const activate = () => {
+    const row = rows[sel];
+    if (row?.type !== "field") return;
+    const f = row.field;
+    if (f.kind === "toggle") return apply(f, f.value === "on" ? "off" : "on");
+    if (f.kind === "enum" && f.options?.length) {
+      const next = f.options[(f.options.indexOf(f.value) + 1) % f.options.length]!;
+      return apply(f, next);
+    }
+    setEditValue(f.value);
+    setEditCur(f.value.length);
     setEditing(true);
   };
 
   const commitEdit = () => {
-    const f = fields[sel];
     setEditing(false);
-    if (!f) return;
-    const v = editValue.trim();
-    if (v === "" || v === f.get()) return;
-    try {
-      f.apply(v);
-      setDirty((prev) => new Set(prev).add(f.id));
-    } catch (err) {
-      onNote(`setup: could not apply ${f.label}: ${(err as Error).message}`);
+    if (adding) {
+      setAdding(false);
+      const name = addPreset(settings, editValue);
+      if (name === null) return onNote("setup: preset name empty or already taken");
+      setDirty((prev) => new Set(prev).add("models"));
+      onNote(`setup: LLM "${name}" added (cloned from the active stack) — adjust its fields, then s to save`);
+      return;
     }
+    const row = rows[sel];
+    if (row?.type !== "field") return;
+    const v = editValue.trim();
+    if (v === row.field.value) return;
+    apply(row.field, v);
   };
 
   useInput((char, key) => {
     if (editing) {
       if (key.return) return commitEdit();
-      if (key.escape) return setEditing(false);
+      if (key.escape) {
+        setAdding(false);
+        return setEditing(false);
+      }
       if (key.leftArrow) return setEditCur((c) => Math.max(0, c - 1));
       if (key.rightArrow) return setEditCur((c) => Math.min(editValue.length, c + 1));
       if (key.ctrl && char === "a") return setEditCur(0);
@@ -349,9 +159,28 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
       return;
     }
     if (key.escape || char === "q") return onClose();
-    if (key.upArrow) return setSel((s) => Math.max(0, s - 1));
-    if (key.downArrow) return setSel((s) => Math.min(fields.length - 1, s + 1));
-    if (key.return || char === "e") return startEdit();
+    if (key.upArrow) return move(-1);
+    if (key.downArrow) return move(1);
+    if (key.return || char === "e") return activate();
+    if (char === "a") {
+      setAdding(true);
+      setEditValue("");
+      setEditCur(0);
+      setEditing(true);
+      return;
+    }
+    if (char === "x") {
+      const row = rows[sel];
+      if (row?.type !== "field" || !row.removable) return;
+      if (removePreset(settings, row.removable)) {
+        setDirty((prev) => new Set(prev).add("models"));
+        let newLen = 0;
+        for (const g of listGroups(settings)) newLen += 1 + g.fields.length;
+        setSel((s) => Math.max(1, Math.min(s, newLen - 1)));
+        onNote(`setup: LLM "${row.removable}" removed — s to save (defaults stay gone once saved)`);
+      }
+      return;
+    }
     if (char === "r") return void recheck(true);
     if (char === "s") {
       if (dirty.size === 0) return onNote("setup: nothing changed — nothing to save");
@@ -365,24 +194,33 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
     }
   });
 
+  const isDirty = (f: SetupField) =>
+    dirty.has(f.id) || (f.id.startsWith("preset.") && dirty.has("models"));
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
       <Text color="cyan" bold>
         ⚙ GRAYSKULL setup
+        {dirty.size > 0 && <Text color="yellow"> · {dirty.size} unsaved (press s)</Text>}
       </Text>
 
-      <Box marginTop={1}>
-        <Text bold>Endpoints</Text>
-        {dirty.size > 0 && <Text color="yellow"> · {dirty.size} unsaved (press s)</Text>}
-      </Box>
-      {fields.map((f, i) => {
+      {rows.map((row, i) => {
+        if (row.type === "header") {
+          return (
+            <Box key={`h${i}`} marginTop={1}>
+              <Text bold>{row.title}</Text>
+              {row.removable && <Text dimColor> (x removes)</Text>}
+            </Box>
+          );
+        }
+        const f = row.field;
         const isSel = i === sel;
-        const isEdit = isSel && editing;
+        const isEdit = isSel && editing && !adding;
         return (
           <Box key={f.id}>
             <Text color={isSel ? "cyan" : undefined}>
               {isSel ? "▸ " : "  "}
-              {f.label.padEnd(20)}
+              {f.label.padEnd(19)}
             </Text>
             {isEdit ? (
               <Text>
@@ -391,15 +229,28 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
                 {editValue.slice(editCur + 1)}
               </Text>
             ) : (
-              <Text color={dirty.has(f.id) ? "yellow" : undefined}>{f.get()}</Text>
+              <Text color={isDirty(f) ? "yellow" : undefined}>
+                {f.kind === "enum" ? `‹ ${f.value} ›` : f.kind === "toggle" ? (f.value === "on" ? "[on]" : "[off]") : f.value || "—"}
+              </Text>
             )}
-            {!isEdit && f.hint && <Text dimColor>{"  "}{f.hint()}</Text>}
+            {!isEdit && f.hint && <Text dimColor>{"  "}{f.hint}</Text>}
           </Box>
         );
       })}
 
+      {adding && editing && (
+        <Box marginTop={1}>
+          <Text color="cyan">{"▸ new LLM name       "}</Text>
+          <Text>
+            {editValue.slice(0, editCur)}
+            <Text inverse>{editValue[editCur] ?? " "}</Text>
+            {editValue.slice(editCur + 1)}
+          </Text>
+        </Box>
+      )}
+
       <Box marginTop={1}>
-        <Text bold>Services</Text>
+        <Text bold>SERVICES</Text>
         {checking && <Text dimColor> checking…</Text>}
       </Box>
       {services.map((s) => (
@@ -422,8 +273,10 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
       <Box marginTop={1}>
         <Text dimColor>
           {editing
-            ? "enter apply · esc cancel edit"
-            : "↑↓ select · enter edit (applies live) · s save → settings.json · r recheck+reconnect · esc close"}
+            ? adding
+              ? "enter create LLM · esc cancel"
+              : "enter apply · esc cancel edit"
+            : "↑↓ select · enter edit/cycle/flip · a add LLM · x remove LLM · s save · r recheck · esc close"}
         </Text>
       </Box>
     </Box>

@@ -21,6 +21,7 @@ import { loadChains, saveChain, BUILTIN_STEPS } from "../chains/registry";
 import { loadSkills } from "../skills/registry";
 import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
+import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset } from "../setup/core";
 import { modelProfile } from "../llm/profiles";
 import {
   saveSession, loadSession, loadSessionMetas, deleteSession, ensureWebDirs,
@@ -314,6 +315,7 @@ export class WebSession {
         this.items.length = 0;
         this.send({ t: "replay", items: [] });
       },
+      openSetup: () => void this.setupOpen(),
       exit: () => note("sessions are closed from the browser, not /exit"),
     };
     try {
@@ -480,6 +482,64 @@ export class WebSession {
       skills: loadSkills(this.cwd).map((s) => s.name),
       mcpTools: this.agent.mcpToolNames(),
     });
+  }
+
+  /** /setup in the browser: send the setup modal's data — field groups
+   *  immediately, services after the (slow, network-probing) checks finish. */
+  async setupOpen(): Promise<void> {
+    this.send({ t: "setup_data", groups: listGroups(this.settings), services: [], checking: true });
+    const services = await checkServices(this.settings, this.mcp, this.cwd);
+    this.send({ t: "setup_data", groups: listGroups(this.settings), services, checking: false });
+  }
+
+  /** Live-apply one field edit from the browser (persisted only on save). */
+  setupApply(id: string, value: string): void {
+    const ok = applyField(id, value, {
+      settings: this.settings,
+      client: this.client,
+      mcp: this.mcp,
+      onAsyncChange: () => void this.setupRefresh(),
+    });
+    this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: ok ? null : id });
+    this.sendStatus();
+  }
+
+  private async setupRefresh(): Promise<void> {
+    const services = await checkServices(this.settings, this.mcp, this.cwd);
+    this.send({ t: "setup_data", groups: listGroups(this.settings), services, checking: false });
+  }
+
+  setupPresetAdd(name: string): void {
+    const added = addPreset(this.settings, name);
+    if (!added) this.send({ t: "error", text: `preset name "${name}" empty or already taken` });
+    this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+  }
+
+  setupPresetRemove(name: string): void {
+    if (removePreset(this.settings, name)) {
+      this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+    }
+  }
+
+  setupSave(ids: unknown): void {
+    const dirty = new Set((Array.isArray(ids) ? ids : []).filter((x): x is string => typeof x === "string"));
+    if (!dirty.size) return;
+    try {
+      const path = saveGlobal(this.settings, dirty);
+      this.send({ t: "setup_saved", path });
+      this.bridge.pushItem({
+        type: "note",
+        text: `setup: saved ${dirty.size} change${dirty.size > 1 ? "s" : ""} → ${path}`,
+      });
+    } catch (err) {
+      this.send({ t: "error", text: `setup save failed: ${(err as Error).message}` });
+    }
+  }
+
+  async setupRecheck(): Promise<void> {
+    this.send({ t: "setup_data", groups: listGroups(this.settings), services: [], checking: true });
+    const services = await recheckServices(this.settings, this.mcp, this.cwd, true);
+    this.send({ t: "setup_data", groups: listGroups(this.settings), services, checking: false });
   }
 
   /** Persist a chain edited in the browser editor. */
