@@ -187,6 +187,16 @@ export const SettingsSchema = z.object({
       deny: z.array(z.string()).default([]),
     })
     .default({ allow: [], deny: [] }),
+  /** stuck detection → auto web-research nudge (agent/stuck.ts): after
+   *  editThreshold edits without a fix, or the same problem reported
+   *  repeatThreshold times, the model is told to search the web for ideas */
+  stuckResearch: z
+    .object({
+      enabled: z.boolean().default(true),
+      editThreshold: z.number().int().min(2).default(10),
+      repeatThreshold: z.number().int().min(2).default(2),
+    })
+    .default({ enabled: true, editThreshold: 10, repeatThreshold: 2 }),
   /** post-edit project check injected into tool results (auto-detected) */
   diagnostics: z
     .object({

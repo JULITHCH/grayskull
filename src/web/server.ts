@@ -1,6 +1,8 @@
 // `with { type: "text" }` makes Bun embed the file as a string (also inside
 // compiled binaries); the HTMLBundle type from @types/bun doesn't know that.
 import indexHtmlRaw from "./ui.html" with { type: "text" };
+// `type: "file"` embeds the asset in compiled binaries and resolves to a path
+import zenMp3Path from "./zen.mp3" with { type: "file" };
 import { SessionManager } from "./session";
 import { ensureGlobalSystemPrompt, loadSettings } from "../config/settings";
 import { ensureDirs } from "../config/paths";
@@ -262,6 +264,9 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         const kind = url.pathname === "/cli" ? "cli" : "browser";
         if (srv.upgrade(req, { data: { id: ++wsCounter, kind } })) return undefined as unknown as Response;
         return new Response("upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/zen.mp3") {
+        return new Response(Bun.file(zenMp3Path), { headers: { "content-type": "audio/mpeg" } });
       }
       return new Response(indexHtml, {
         headers: { "content-type": "text/html; charset=utf-8" },

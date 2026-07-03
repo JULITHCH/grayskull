@@ -10,6 +10,7 @@ import { validateCall, recoverTextToolCall, sanitizeToolCallArgs } from "./repai
 import { needsCompaction, compact, memorySwap } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, loadSkills, type SkillDef } from "../skills/registry";
+import { StuckTracker } from "./stuck";
 import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
 import type { ModelPreset } from "../config/settings";
@@ -61,6 +62,9 @@ export async function runToolLoop(opts: {
   /** drains user steering messages typed mid-run (via /inject); each is appended
    *  to the conversation before the next model call so it changes course live */
   drainInjections?: () => string[];
+  /** drains harness-side nudges (e.g. stuck-detection → auto-research); each
+   *  is appended verbatim as a user message before the next model call */
+  drainNudges?: () => string[];
   /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
   maxTurns?: number;
   /** unattended run (kamikazeee): the iteration cap warns instead of stopping —
@@ -97,6 +101,10 @@ export async function runToolLoop(opts: {
     for (const text of opts.drainInjections?.() ?? []) {
       messages.push({ role: "user", content: `[Steering update from the user, sent while you were working — apply it now]:\n${text}` });
       ctx.note(`↪ steering: ${text}`);
+    }
+    // harness nudges (stuck-detection → auto-research); provider does its own UI note
+    for (const text of opts.drainNudges?.() ?? []) {
+      messages.push({ role: "user", content: text });
     }
     const result = await client.complete(
       messages,
@@ -399,7 +407,11 @@ export class GrayskullAgent {
     this.perms = opts.perms;
     this.memory = opts.memory;
     this.ui = opts.ui;
+    this.stuck = new StuckTracker(opts.settings.stuckResearch);
   }
+
+  /** stuck detection → auto web-research nudge (see agent/stuck.ts) */
+  private stuck: StuckTracker;
 
   stop(): void {
     this.abort?.abort();
@@ -570,6 +582,8 @@ export class GrayskullAgent {
     this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, "thinking");
+    // repeated problem report / episode reset (arms an auto-research nudge)
+    this.stuck.notePrompt(userText);
 
     // explicit-trigger path → global vault
     if (detectGlobalTrigger(userText, this.settings.memory.globalTriggers)) {
@@ -716,6 +730,13 @@ export class GrayskullAgent {
         this.injections = [];
         return out;
       },
+      drainNudges: () => {
+        const nudge = this.stuck.drainNudge();
+        if (!nudge) return [];
+        this.ui.pushItem({ type: "note", text: `🔎 stuck detected (${nudge.reason}) → researching online for ideas` });
+        turnLog.push(`stuck-detection fired: ${nudge.reason} — auto-research nudge injected`);
+        return [nudge.text];
+      },
       messages,
       ctx,
       signal,
@@ -728,6 +749,7 @@ export class GrayskullAgent {
       onToolEvent: (item) => {
         this.ui.pushItem(item);
         if (item.state === "done") {
+          if (this.registry.get(item.name)?.kind === "edit") this.stuck.noteEdit();
           const isWeb = item.name.startsWith("mcp__searxng__");
           const resultSnippet = isWeb ? `\nresult: ${(item.result ?? "").slice(0, 3000)}` : "";
           turnLog.push(`tool ${item.detail}${resultSnippet}`);
