@@ -17,6 +17,7 @@ import type { ModelPreset } from "../config/settings";
 import { resolveStepProfile, resolveStepConfig } from "../chains/registry";
 import type { ChainDef } from "../chains/registry";
 import { spawnSync } from "node:child_process";
+import { randomQuip } from "../ui/quips";
 
 const MAX_LOOP_TURNS = 40;
 const MAX_REPAIR_ATTEMPTS = 3;
@@ -605,7 +606,7 @@ export class GrayskullAgent {
     this.abort = new AbortController();
     this.lastError = null;
     const signal = this.abort.signal;
-    this.ui.setBusy(true, "thinking");
+    this.ui.setBusy(true, randomQuip());
     // repeated problem report / episode reset (arms an auto-research nudge)
     this.stuck.notePrompt(userText);
 
