@@ -22,22 +22,34 @@ import { loadSkills } from "../skills/registry";
 import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
 import { modelProfile } from "../llm/profiles";
+import {
+  saveSession, loadSession, loadSessionMetas, deleteSession, ensureWebDirs,
+  CHATS_CWD, type SavedSession, type SavedSessionMeta, type SessionKind,
+} from "./persist";
+import { registerWorkerTools, workerPromptSection } from "../workers/tools";
 
 /** slash commands that open $EDITOR or fzf — they would hang the server.
  *  `/tc edit` opens the clickable chain editor instead; /resume is tty-free
  *  (numbered list) and works here. */
-const TERMINAL_ONLY = /^\/(system|settings)\b|^\/(memory|agents)\s+edit\b/;
+const TERMINAL_ONLY = /^\/(system|settings)\b|^\/(memory|agents|workers)\s+edit\b/;
 
 /** `/tc edit [name]` / `/thinkingchain edit [name]` → browser chain editor */
 const CHAIN_EDIT_RE = /^\/(?:tc|thinkingchain)\s+edit\b\s*(.*)$/;
 
 export type Broadcast = (msg: Record<string, unknown>) => void;
 
-let sessionCounter = 0;
+/** Collision-safe across server restarts (persisted sids must stay unique). */
+function newSid(): string {
+  return `s-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+}
 
 export class WebSession {
   readonly sid: string;
   readonly cwd: string;
+  readonly kind: SessionKind;
+  /** chats: first prompt excerpt shown in the sidebar; projects: "" */
+  title = "";
+  private readonly createdAt: number;
   readonly settings: Settings;
   readonly agent: GrayskullAgent;
   readonly perms: PermissionEngine;
@@ -46,6 +58,12 @@ export class WebSession {
   readonly client: LlmClient;
   busy = false;
   busyWhat = "";
+  /** wall-clock start of the current busy stretch (elapsed timer). */
+  private busyStartAt = 0;
+  /** session tokens at busy start — turn counter shows tokens since. */
+  private busyTokSnap = 0;
+  /** 1s ticker streaming elapsed/token updates to browsers while busy. */
+  private tokTicker: ReturnType<typeof setInterval> | null = null;
   /** full transcript so newly connected browsers can replay it */
   readonly items: TranscriptItem[] = [];
   private store: SessionStore;
@@ -62,9 +80,13 @@ export class WebSession {
   private sticky: { def: ChainDef; mode: ChainContextMode } | null = null;
   private bridge: UiBridge;
 
-  constructor(cwd: string, broadcast: Broadcast) {
-    this.sid = `s${++sessionCounter}`;
+  constructor(cwd: string, broadcast: Broadcast, opts: { kind?: SessionKind; restore?: SavedSession } = {}) {
+    const r = opts.restore;
+    this.sid = r?.sid ?? newSid();
     this.cwd = cwd;
+    this.kind = r?.kind ?? opts.kind ?? "project";
+    this.title = r?.title ?? "";
+    this.createdAt = r?.createdAt ?? Date.now();
     this.broadcast = broadcast;
     ensureDirs(cwd);
     this.settings = loadSettings(cwd);
@@ -77,11 +99,13 @@ export class WebSession {
     registry.register(todo.tool);
     const skillGate = { forbidden: new Set<string>() };
     registry.register(skillTool(cwd, skillGate));
+    registerWorkerTools({ registry, client: this.client, settings: this.settings, cwd });
     registerAgentTools({
       cwd,
       client: this.client,
       registry,
       concurrency: this.settings.agentConcurrency,
+      settings: this.settings,
       leakDialect: () => modelProfile(this.settings.modelFamily).leakDialect,
       monitor: (ev) => this.send({ t: "agent", ev }),
     });
@@ -126,9 +150,18 @@ export class WebSession {
           this.send(msg);
         }),
       setBusy: (busy, what) => {
+        if (busy && !this.busy) {
+          this.busyStartAt = Date.now();
+          this.busyTokSnap = this.client.sessionTokens();
+          this.tokTicker ??= setInterval(() => this.sendTok(), 1000);
+        }
+        if (!busy && this.tokTicker) {
+          clearInterval(this.tokTicker);
+          this.tokTicker = null;
+        }
         this.busy = busy;
         this.busyWhat = what ?? "";
-        this.send({ t: "busy", busy, what: this.busyWhat });
+        this.send({ t: "busy", busy, what: this.busyWhat, busyMs: busy ? Date.now() - this.busyStartAt : 0 });
         this.sendStatus();
       },
     };
@@ -148,14 +181,50 @@ export class WebSession {
       ui: bridge,
     });
     this.agent.agentListing = () => agentListing(cwd);
+    this.agent.workerListing = () => workerPromptSection();
     this.agent.skillListing = (exclude) => skillListing(cwd, exclude);
     this.agent.skillGate = skillGate;
+
+    // picked back up from disk: conversation + transcript + mode carry over
+    if (r) {
+      this.agent.history = r.history ?? [];
+      this.items.push(...(r.items ?? []));
+      if ((MODE_ORDER as string[]).includes(r.mode)) this.perms.mode = r.mode as PermissionMode;
+    }
+    this.persist();
 
     void this.mcp.connectAll(this.settings);
   }
 
+  /** Snapshot to disk — sidebar entries survive restarts and can be resumed. */
+  persist(): void {
+    saveSession({
+      sid: this.sid,
+      kind: this.kind,
+      cwd: this.cwd,
+      title: this.title,
+      mode: this.perms.mode,
+      createdAt: this.createdAt,
+      updatedAt: Date.now(),
+      items: this.items,
+      history: this.agent.history,
+    });
+  }
+
   private send(msg: Record<string, unknown>): void {
     this.broadcast({ sid: this.sid, ...msg });
+  }
+
+  /** Live elapsed/token tick, streamed once a second while the turn runs so
+   *  browsers can show progress (or the lack of it — hang detection). */
+  private sendTok(): void {
+    this.send({
+      t: "tok",
+      tokens: this.client.sessionTokens(),
+      turnTokens: this.client.sessionTokens() - this.busyTokSnap,
+      tps: Math.round(this.client.lastTokensPerSec),
+      busyMs: this.busy ? Date.now() - this.busyStartAt : 0,
+    });
   }
 
   sendStatus(): void {
@@ -164,6 +233,9 @@ export class WebSession {
       mode: this.perms.mode,
       busy: this.busy,
       what: this.busyWhat,
+      busyMs: this.busy ? Date.now() - this.busyStartAt : 0,
+      tokens: this.client.sessionTokens(),
+      turnTokens: this.busy ? this.client.sessionTokens() - this.busyTokSnap : 0,
       ctxPct: Math.min(100, Math.round((this.client.lastPromptTokens / this.settings.contextWindow) * 100)),
       tps: Math.round(this.client.lastTokensPerSec),
       mcp: [...this.mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
@@ -195,10 +267,15 @@ export class WebSession {
   }
 
   summary(): Record<string, unknown> {
-    return { sid: this.sid, cwd: this.cwd, mode: this.perms.mode, busy: this.busy };
+    return { sid: this.sid, cwd: this.cwd, mode: this.perms.mode, busy: this.busy, kind: this.kind, title: this.title };
   }
 
   prompt(text: string, images: string[] = []): void {
+    // chats are titled by their first prompt, like every chat app
+    if (this.kind === "chat" && !this.title && !text.startsWith("/")) {
+      this.title = text.replace(/\s+/g, " ").trim().slice(0, 48);
+      this.send({ t: "sess_title", title: this.title });
+    }
     if (text.startsWith("/")) {
       void this.handleSlash(text);
       return;
@@ -305,6 +382,7 @@ export class WebSession {
           });
         }
         this.store.save(this.agent.history);
+        this.persist();
         this.sendMemory();
         this.sendStatus();
       }
@@ -347,11 +425,16 @@ export class WebSession {
    *  MCP servers (their child processes — playwright chrome etc. — otherwise
    *  live until the grayskull-web process dies). */
   close(): void {
+    if (this.tokTicker) {
+      clearInterval(this.tokTicker);
+      this.tokTicker = null;
+    }
     this.agent.stop();
     for (const [reqId, entry] of this.pending) {
       this.pending.delete(reqId);
       entry.resolve("no");
     }
+    this.persist(); // closing parks it in the sidebar, resumable any time
     void this.mcp.closeAll().catch(() => {});
   }
 
@@ -482,15 +565,20 @@ function sanitizeStepConfigs(raw: unknown): Record<string, StepConfig> | undefin
 
 export class SessionManager {
   readonly sessions = new Map<string, WebSession>();
+  /** persisted sessions not currently running — shown dimmed in the sidebar */
+  readonly dormant = new Map<string, SavedSessionMeta>();
   private broadcast: Broadcast;
 
   constructor(broadcast: Broadcast) {
     this.broadcast = broadcast;
+    ensureWebDirs();
+    for (const meta of loadSessionMetas()) this.dormant.set(meta.sid, meta);
   }
 
-  create(cwd: string, createDir = false): WebSession | { error: string } | { needsCreate: string } {
+  create(cwd: string, createDir = false, kind: SessionKind = "project"): WebSession | { error: string } | { needsCreate: string } {
+    if (kind === "chat") cwd = CHATS_CWD; // folder-less chats share a synthetic home
     if (!existsSync(cwd)) {
-      if (!createDir) return { needsCreate: cwd };
+      if (!createDir && kind !== "chat") return { needsCreate: cwd };
       try {
         mkdirSync(cwd, { recursive: true });
       } catch (err) {
@@ -498,7 +586,7 @@ export class SessionManager {
       }
     }
     try {
-      const session = new WebSession(cwd, this.broadcast);
+      const session = new WebSession(cwd, this.broadcast, { kind });
       this.sessions.set(session.sid, session);
       this.broadcastList();
       session.sendStatus();
@@ -509,7 +597,41 @@ export class SessionManager {
     }
   }
 
+  /** Pick a parked session back up: reload conversation + transcript from disk
+   *  and wire up a fresh registry/MCP/memory around it. */
+  resume(sid: string): WebSession | { error: string } {
+    const active = this.sessions.get(sid);
+    if (active) return active;
+    const saved = loadSession(sid);
+    if (!saved) return { error: `no saved session ${sid}` };
+    if (!existsSync(saved.cwd)) return { error: `directory ${saved.cwd} no longer exists` };
+    try {
+      const session = new WebSession(saved.cwd, this.broadcast, { restore: saved });
+      this.sessions.set(session.sid, session);
+      this.dormant.delete(sid);
+      this.broadcastList();
+      this.broadcast({ t: "replay", sid: session.sid, items: session.items.slice(-300) });
+      session.sendStatus();
+      session.sendMemory();
+      return session;
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  }
+
+  /** Metas for the sidebar (active sids excluded, newest first). */
+  dormantList(): SavedSessionMeta[] {
+    return [...this.dormant.values()]
+      .filter((m) => !this.sessions.has(m.sid))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /** Set by the server so list updates always carry the full picture
+   *  (active + dormant + attached CLI sessions). */
+  onListChange: (() => void) | null = null;
+
   broadcastList(): void {
+    if (this.onListChange) return this.onListChange();
     this.broadcast({ t: "sessions", list: [...this.sessions.values()].map((s) => s.summary()) });
   }
 
@@ -518,6 +640,19 @@ export class SessionManager {
     if (!session) return;
     this.sessions.delete(sid);
     session.close();
+    // parked, not gone: it reappears in the sidebar as resumable
+    this.dormant.set(sid, {
+      sid, kind: session.kind, cwd: session.cwd, title: session.title,
+      mode: session.perms.mode, createdAt: 0, updatedAt: Date.now(),
+    });
+    this.broadcastList();
+  }
+
+  /** Permanently delete a parked session's file. Active sessions are closed first. */
+  delete(sid: string): void {
+    if (this.sessions.has(sid)) this.close(sid);
+    this.dormant.delete(sid);
+    deleteSession(sid);
     this.broadcastList();
   }
 }

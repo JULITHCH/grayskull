@@ -54,6 +54,8 @@ export function historyToTranscript(messages: ChatMessage[], perMsgCap = 2000, t
 export async function memorySwap(client: LlmClient, history: ChatMessage[]): Promise<ChatMessage[]> {
   const brief = await client.oneShot(HANDOFF_SYSTEM, historyToTranscript(history), 1600);
   if (!brief.trim()) throw new Error("empty handoff brief");
+  // the context-fill gauge reflects the pre-swap window until the next request
+  client.lastPromptTokens = 0;
   return [
     {
       role: "user",
@@ -71,9 +73,14 @@ export function needsCompaction(
   contextWindow: number,
   threshold: number,
   maxTokens: number,
+  /** when given, uses the client's calibrated estimate (real-token drift +
+   *  tool schemas) — the raw chars/4 estimate runs ~1.4× low on dense code
+   *  and misses schemas entirely, letting sessions 400 on context overflow. */
+  client?: LlmClient,
 ): boolean {
+  const est = client ? client.estimatePrompt(messages) : estimateMessagesTokens(messages);
   // leave room for the reply
-  return estimateMessagesTokens(messages) > contextWindow * threshold - maxTokens;
+  return est > contextWindow * threshold - maxTokens;
 }
 
 /**
@@ -110,6 +117,7 @@ export async function compact(
     .join("\n\n");
 
   const summary = await client.oneShot(COMPACT_SYSTEM, transcript, 2048);
+  client.lastPromptTokens = 0;
   return [
     {
       role: "user",

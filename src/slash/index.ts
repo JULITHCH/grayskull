@@ -31,6 +31,9 @@ import {
   type ChainContextMode,
 } from "../chains/registry";
 import { chainState } from "../chains/runner";
+import { loadWorker, deleteWorker, saveWorkerConfig, missingConfig, workerListing } from "../workers/registry";
+import { activeScheduler, setJobEnabled, removeJob, jobListing, JOB_LOG_DIR } from "../scheduler/scheduler";
+import { join } from "node:path";
 import { openInEditor } from "../ui/external";
 import { existsSync, writeFileSync } from "node:fs";
 import { MODE_ORDER } from "../types";
@@ -298,6 +301,71 @@ export const COMMANDS: SlashCommand[] = [
         return note(ctx, 'no agents yet. Ask for one: "create an agent that checks for spelling mistakes"');
       }
       note(ctx, agents.map((a) => `${a.name} [${a.scope}] — ${a.description}`).join("\n"));
+    },
+  },
+  {
+    name: "workers",
+    description: "list workers; /workers config <name> key=value … | edit|delete <name>",
+    run: async (ctx, args) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      if (parts[0] === "config" && parts[1]) {
+        const def = loadWorker(parts[1]);
+        if (!def) return note(ctx, `no worker named ${parts[1]}`);
+        const values: Record<string, string> = {};
+        for (const kv of parts.slice(2)) {
+          const m = kv.match(/^([\w-]+)=(.*)$/);
+          if (m) values[m[1]!] = m[2]!;
+        }
+        if (!Object.keys(values).length) {
+          const missing = missingConfig(def);
+          return note(ctx, `usage: /workers config ${def.name} key=value …\nfields: ${def.fields.map((f) => `${f.key} — ${f.description}`).join("\n        ")}\nmissing: ${missing.map((f) => f.key).join(", ") || "(none)"}`);
+        }
+        saveWorkerConfig(def.name, values);
+        const missing = missingConfig(def);
+        return note(ctx, missing.length ? `saved — still missing: ${missing.map((f) => f.key).join(", ")}` : `saved — ${def.name} fully configured`);
+      }
+      if (parts[0] === "edit" && parts[1]) {
+        const def = loadWorker(parts[1]);
+        if (!def) return note(ctx, `no worker named ${parts[1]}`);
+        openInEditor(def.filePath, ctx.settings.editor);
+        return note(ctx, `edited ${def.filePath}`);
+      }
+      if (parts[0] === "delete" && parts[1]) {
+        return note(ctx, deleteWorker(parts[1]) ? `deleted worker ${parts[1]} (incl. config)` : `no worker named ${parts[1]}`);
+      }
+      const listing = workerListing();
+      note(ctx, listing || 'no workers yet. Ask for one: "erstelle einen worker der auf LinkedIn posten kann"');
+    },
+  },
+  {
+    name: "jobs",
+    description: "scheduled jobs: list; /jobs run|on|off|delete <name> | log <name>",
+    run: async (ctx, args) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const name = parts[1];
+      if (parts[0] === "run" && name) {
+        const sched = activeScheduler();
+        if (!sched) return note(ctx, "the scheduler runs inside grayskull-web — start it (or use run_worker here)");
+        note(ctx, `⚙ running job ${name}…`);
+        const summary = await sched.runJob(name);
+        return note(ctx, summary.slice(0, 1500));
+      }
+      if ((parts[0] === "on" || parts[0] === "off") && name) {
+        return note(ctx, setJobEnabled(name, parts[0] === "on") ? `job ${name} ${parts[0] === "on" ? "enabled" : "disabled"}` : `no job named ${name}`);
+      }
+      if (parts[0] === "delete" && name) {
+        return note(ctx, removeJob(name) ? `deleted job ${name}` : `no job named ${name}`);
+      }
+      if (parts[0] === "log" && name) {
+        const path = join(JOB_LOG_DIR, `${name}.log`);
+        if (!existsSync(path)) return note(ctx, `no log for job ${name} yet`);
+        const lines = readFileSync(path, "utf8").trim().split("\n");
+        return note(ctx, lines.slice(-30).join("\n"));
+      }
+      const listing = jobListing();
+      note(ctx, listing
+        ? `${listing}\n\njobs run inside grayskull-web · /jobs run|on|off|delete|log <name>`
+        : 'no jobs yet. Ask for one: "poste jeden montag um 9 einen artikel über X auf linkedin"');
     },
   },
   {

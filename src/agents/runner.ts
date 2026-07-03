@@ -3,6 +3,8 @@ import type { AgentMonitorEvent, ChatMessage, ToolContext, ToolDef } from "../ty
 import type { LlmClient } from "../llm/client";
 import type { ToolRegistry } from "../tools";
 import { runToolLoop } from "../agent/loop";
+import { needsCompaction, compact } from "../agent/compact";
+import type { Settings } from "../config/settings";
 import type { LeakDialect } from "../llm/profiles";
 import { loadAgents, writeAgentDef, DEFAULT_AGENT_TOOLS } from "./registry";
 import { autoMatchSkills, autoSkillBlock } from "../skills/registry";
@@ -46,6 +48,9 @@ export function registerAgentTools(opts: {
   client: LlmClient;
   registry: ToolRegistry;
   concurrency: number;
+  /** context-window limits for sub-agent self-compaction; without it a long
+   *  sub-agent run grows until the server 400s on context overflow */
+  settings?: Pick<Settings, "contextWindow" | "compactThreshold" | "maxTokens">;
   /** tool-call leak dialect for the model family (resolved live so /model
    *  switches reach sub-agents too) */
   leakDialect?: () => LeakDialect;
@@ -123,6 +128,23 @@ export function registerAgentTools(opts: {
           askUser: async () => "(sub-agents cannot ask the user — decide yourself)",
           note: () => {},
         };
+        // sub-agents have no memory reseed, so classic compaction (summary +
+        // recent tail) is the right strategy when their window fills mid-run
+        const maybeCompact = opts.settings
+          ? async (msgs: ChatMessage[]): Promise<void> => {
+              const s = opts.settings!;
+              if (!needsCompaction(msgs, s.contextWindow, s.compactThreshold, s.maxTokens, client)) return;
+              const system = msgs[0];
+              if (!system || msgs.length <= 2) return;
+              try {
+                const tail = await compact(client, msgs.slice(1));
+                msgs.splice(0, msgs.length, system, ...tail);
+                ctx.note(`  ⚔ ${agentName} · context compacted`);
+              } catch {
+                // next request may still fit or error cleanly
+              }
+            }
+          : undefined;
         const result = await runToolLoop({
           client,
           registry,
@@ -130,6 +152,7 @@ export function registerAgentTools(opts: {
           leakDialect: opts.leakDialect?.(),
           messages,
           ctx: subCtx,
+          ...(maybeCompact ? { maybeCompact } : {}),
           onTextDelta: (text) => monitor({ kind: "delta", id: spawnId, agent: agentName, text }),
           // sub-agent work must be visible in the main transcript
           onToolEvent: (i) => {

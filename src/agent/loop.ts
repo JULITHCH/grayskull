@@ -299,6 +299,9 @@ export class GrayskullAgent {
   }
   /** Set by the sub-agent module so spawn_agent can run nested loops. */
   agentListing: () => string = () => "";
+  /** workers (external-action plugins) + scheduled jobs, injected so the model
+   *  knows what capabilities exist and how to extend them */
+  workerListing: () => string = () => "";
   /** Set at startup; lists SKILL.md skills for the system prompt. */
   skillListing: (exclude?: Set<string>) => string = () => "";
 
@@ -493,6 +496,7 @@ export class GrayskullAgent {
     ].join("\n");
     const memory = this.memory.render();
     const agents = this.agentListing();
+    const workers = this.workerListing();
     // forbidden skills are dropped from the catalog: no point advertising (and
     // paying ~60 tok/skill for) something the model is told it can't use
     const skills = this.skillListing(this.skillGate.forbidden);
@@ -514,6 +518,7 @@ export class GrayskullAgent {
         `# Environment\n${env}`,
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",
+        workers,
         skills
           ? `# Available skills\nIf the request involves a topic listed below, you MUST call the skill tool with that skill's name BEFORE writing any code or answer — treat your own memory of these libraries as outdated. Then follow the returned instructions.\n${skills}`
           : "",
@@ -535,7 +540,7 @@ export class GrayskullAgent {
    *  keep the system message (memory/skills), swap/compact the conversation. */
   private async compactInLoop(messages: ChatMessage[]): Promise<void> {
     if (
-      !needsCompaction(messages, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens)
+      !needsCompaction(messages, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens, this.client)
     ) {
       return;
     }
@@ -553,8 +558,10 @@ export class GrayskullAgent {
         this.ui.pushItem({ type: "note", text: "context compacted mid-task" });
       }
       messages.splice(0, messages.length, system, ...tail); // mutate in place (caller holds this ref)
-    } catch {
-      // leave messages as-is; the next request may still fit or error cleanly
+    } catch (err) {
+      // leave messages as-is; the next request may still fit or error cleanly —
+      // but say so, a silent failure here looks like compaction never ran
+      this.ui.pushItem({ type: "note", text: `⚠ mid-turn compaction failed (${(err as Error).message}) — continuing with full window` });
     }
   }
 
@@ -576,7 +583,7 @@ export class GrayskullAgent {
     }
 
     if (
-      needsCompaction(this.history, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens)
+      needsCompaction(this.history, this.settings.contextWindow, this.settings.compactThreshold, this.settings.maxTokens, this.client)
     ) {
       if (this.settings.compactStrategy === "memory-swap") {
         this.ui.setBusy(true, "context full — saving task state, clearing window");

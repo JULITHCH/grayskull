@@ -16,12 +16,15 @@ import { skillTool } from "./skills/tool";
 import { skillListing } from "./skills/registry";
 import { ensureStarterChains } from "./chains/registry";
 import { CliLink } from "./web/clilink";
+import { registerWorkerTools, workerPromptSection } from "./workers/tools";
+import { ensureStarterWorkers } from "./workers/registry";
 import { App } from "./ui/App";
 
 const cwd = process.cwd();
 ensureDirs(cwd);
 ensureGlobalSystemPrompt();
 ensureStarterChains();
+ensureStarterWorkers();
 ensureLegendaryMode();
 
 let settings;
@@ -37,11 +40,13 @@ const registry = new ToolRegistry();
 for (const tool of builtinTools()) registry.register(tool);
 // optional bridge to a running grayskull-web hub (silent retry when absent)
 const link = new CliLink();
+registerWorkerTools({ registry, client, settings, cwd });
 registerAgentTools({
   cwd,
   client,
   registry,
   concurrency: settings.agentConcurrency,
+  settings,
   leakDialect: () => modelProfile(settings.modelFamily).leakDialect,
   monitor: (ev) => link.publish({ t: "agent", ev }),
 });
@@ -66,6 +71,7 @@ const bridge: UiBridge = {
 
 const agent = new GrayskullAgent({ cwd, settings, client, registry, perms, memory, ui: bridge });
 agent.agentListing = () => agentListing(cwd);
+agent.workerListing = () => workerPromptSection();
 agent.skillListing = (exclude) => skillListing(cwd, exclude);
 agent.skillGate = skillGate;
 

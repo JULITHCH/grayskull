@@ -6,9 +6,10 @@ import { readTool, writeTool, editTool } from "./files";
 import { grepTool, globTool } from "./search";
 import { askUserTool } from "./ask_user";
 import { todoTool } from "./todo";
+import { httpTool } from "./http";
 
 export function builtinTools(): ToolDef[] {
-  return [bashTool, readTool, writeTool, editTool, grepTool, globTool, askUserTool, todoTool];
+  return [bashTool, readTool, writeTool, editTool, grepTool, globTool, httpTool, askUserTool, todoTool];
 }
 
 export class ToolRegistry {

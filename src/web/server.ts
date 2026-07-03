@@ -2,9 +2,16 @@
 // compiled binaries); the HTMLBundle type from @types/bun doesn't know that.
 import indexHtmlRaw from "./ui.html" with { type: "text" };
 import { SessionManager } from "./session";
-import { ensureGlobalSystemPrompt } from "../config/settings";
+import { ensureGlobalSystemPrompt, loadSettings } from "../config/settings";
 import { ensureDirs } from "../config/paths";
 import { ensureStarterChains } from "../chains/registry";
+import { ensureStarterWorkers, workerSummaries, saveWorkerConfig, deleteWorker, loadWorker } from "../workers/registry";
+import { Scheduler, setActiveScheduler, loadJobs, upsertJob, removeJob, setJobEnabled, parseEvery, JOB_LOG_DIR } from "../scheduler/scheduler";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { runWorker } from "../workers/runtime";
+import { CHATS_CWD } from "./persist";
+import { LlmClient } from "../llm/client";
 import type { TranscriptItem } from "../types";
 
 const indexHtml = indexHtmlRaw as unknown as string;
@@ -33,6 +40,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   ensureDirs(opts.defaultCwd);
   ensureGlobalSystemPrompt();
   ensureStarterChains();
+  ensureStarterWorkers();
 
   const browsers = new Set<Bun.ServerWebSocket<WsData>>();
   const cliSessions = new Map<string, CliSession>();
@@ -48,8 +56,107 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   const sessionList = () => [
     ...[...manager.sessions.values()].map((s) => ({ ...s.summary(), origin: "web" })),
     ...[...cliSessions.values()].map((c) => ({ sid: c.sid, cwd: c.cwd, mode: c.mode, busy: c.busy, origin: "cli" })),
+    ...manager.dormantList().map((m) => ({ ...m, busy: false, origin: "web", dormant: true })),
   ];
   const broadcastSessions = () => broadcast({ t: "sessions", list: sessionList() });
+  manager.onListChange = broadcastSessions;
+
+  // interval scheduler: this process is the always-on daemon, so worker jobs
+  // live here; the TUI edits the same jobs.json but never runs them
+  const schedSettings = loadSettings(opts.defaultCwd);
+  const schedClient = new LlmClient(schedSettings);
+  const scheduler = new Scheduler(schedClient, schedSettings);
+  // automation state for the GUI panel — config values never leave the server
+  const broadcastAuto = () =>
+    broadcast({
+      t: "auto",
+      workers: workerSummaries(),
+      jobs: loadJobs().sort((a, b) => a.nextRun - b.nextRun).map(({ name, worker, task, every, at, weekday, enabled, nextRun, lastRun, lastStatus, lastSummary }) => ({
+        name, worker, task, every, at, weekday, enabled, nextRun, lastRun, lastStatus, lastSummary,
+      })),
+    });
+  scheduler.onEvent = (ev) => {
+    broadcast({ t: "job", ...ev });
+    if (ev.state !== "start") broadcastAuto();
+  };
+  scheduler.onNote = (job, text) => broadcast({ t: "job_note", job, text });
+  scheduler.start();
+  setActiveScheduler(scheduler);
+
+  /** GUI automation commands — server-global, independent of any session. */
+  const handleAutoMessage = (ws: Bun.ServerWebSocket<WsData>, msg: Record<string, unknown>): boolean => {
+    switch (msg["t"]) {
+      case "auto_state":
+        ws.send(JSON.stringify({ t: "hello_auto" }));
+        broadcastAuto();
+        return true;
+      case "worker_cfg_save": {
+        const name = String(msg["name"] ?? "");
+        if (!loadWorker(name)) return broadcast({ t: "error", text: `no worker ${name}` }), true;
+        const values = (msg["values"] ?? {}) as Record<string, string>;
+        const clean = Object.fromEntries(Object.entries(values).filter(([, v]) => typeof v === "string" && v !== ""));
+        saveWorkerConfig(name, clean as Record<string, string>);
+        broadcastAuto();
+        return true;
+      }
+      case "worker_delete":
+        deleteWorker(String(msg["name"] ?? ""));
+        broadcastAuto();
+        return true;
+      case "job_save": {
+        const j = (msg["job"] ?? {}) as Record<string, unknown>;
+        const name = String(j["name"] ?? "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+        const worker = String(j["worker"] ?? "");
+        const task = String(j["task"] ?? "").trim();
+        const every = String(j["every"] ?? "");
+        if (!name || !task) return broadcast({ t: "error", text: "job needs a name and a task" }), true;
+        if (!loadWorker(worker)) return broadcast({ t: "error", text: `no worker ${worker}` }), true;
+        if (!parseEvery(every)) return broadcast({ t: "error", text: `invalid interval ${every}` }), true;
+        upsertJob({
+          name, worker, task, every,
+          ...(j["at"] ? { at: String(j["at"]) } : {}),
+          ...(j["weekday"] ? { weekday: String(j["weekday"]) } : {}),
+          enabled: j["enabled"] !== false,
+        });
+        broadcastAuto();
+        return true;
+      }
+      case "job_delete":
+        removeJob(String(msg["name"] ?? ""));
+        broadcastAuto();
+        return true;
+      case "job_toggle":
+        setJobEnabled(String(msg["name"] ?? ""), Boolean(msg["enabled"]));
+        broadcastAuto();
+        return true;
+      case "job_run":
+        void scheduler.runJob(String(msg["name"] ?? "")).then(() => broadcastAuto());
+        return true;
+      case "worker_run": {
+        // one-off GUI run, headless like a job but without scheduling
+        const name = String(msg["name"] ?? "");
+        const task = String(msg["task"] ?? "").trim();
+        if (!loadWorker(name) || !task) return broadcast({ t: "error", text: "worker_run needs a worker and a task" }), true;
+        const tag = `worker:${name}`;
+        broadcast({ t: "job", job: tag, state: "start" });
+        void runWorker({
+          worker: name, task, client: schedClient, settings: schedSettings, cwd: CHATS_CWD,
+          onNote: (text) => broadcast({ t: "job_note", job: tag, text }),
+        })
+          .then((r) => broadcast({ t: "job", job: tag, state: "ok", summary: r.slice(0, 300) }))
+          .catch((e) => broadcast({ t: "job", job: tag, state: "error", summary: (e as Error).message }));
+        return true;
+      }
+      case "job_log_req": {
+        const name = String(msg["name"] ?? "").replace(/[^\w-]/g, "");
+        const path = join(JOB_LOG_DIR, `${name}.log`);
+        const text = existsSync(path) ? readFileSync(path, "utf8").split("\n").slice(-80).join("\n") : "(no log yet)";
+        ws.send(JSON.stringify({ t: "job_log", name, text }));
+        return true;
+      }
+    }
+    return false;
+  };
 
   const handleCliMessage = (ws: Bun.ServerWebSocket<WsData>, msg: Record<string, unknown>) => {
     if (msg["t"] === "register") {
@@ -93,13 +200,24 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   };
 
   const handleBrowserMessage = (ws: Bun.ServerWebSocket<WsData>, msg: Record<string, unknown>) => {
+    if (handleAutoMessage(ws, msg)) return;
     const sid = String(msg["sid"] ?? "");
     if (msg["t"] === "new_session") {
       const cwd = String(msg["cwd"] || opts.defaultCwd);
-      const result = manager.create(cwd, Boolean(msg["create"]));
+      const kind = msg["kind"] === "chat" ? "chat" : "project";
+      const result = manager.create(cwd, Boolean(msg["create"]), kind);
       if ("needsCreate" in result) ws.send(JSON.stringify({ t: "confirm_create", cwd: result.needsCreate }));
       else if ("error" in result) broadcast({ t: "error", text: result.error });
       else broadcastSessions();
+      return;
+    }
+    if (msg["t"] === "resume_session") {
+      const result = manager.resume(String(msg["sid"] ?? ""));
+      if ("error" in result) broadcast({ t: "error", text: result.error });
+      return;
+    }
+    if (msg["t"] === "delete_session") {
+      manager.delete(String(msg["sid"] ?? ""));
       return;
     }
     // commands for an attached CLI session are forwarded to its socket
@@ -157,6 +275,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         browsers.add(ws);
         ws.send(JSON.stringify({ t: "hello", defaultCwd: opts.defaultCwd }));
         ws.send(JSON.stringify({ t: "sessions", list: sessionList() }));
+        broadcastAuto();
         for (const s of manager.sessions.values()) {
           ws.send(JSON.stringify({ t: "replay", sid: s.sid, items: s.items.slice(-300) }));
           s.sendStatus();

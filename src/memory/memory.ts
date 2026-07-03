@@ -61,13 +61,43 @@ Rules:
 - One fact per bullet, terse. No narration of what happened, only facts that help future work.
 - Do NOT store secrets, API keys, or passwords.
 - Hard limit: TOKEN_BUDGET tokens. If over, drop the least useful bullets first.
+
+After the five sections, add one more:
+
+## Global candidates
+Bullets from this turn that are project-INDEPENDENT and would matter in a brand-new repo: durable user preferences ("prefers bun over npm"), environment truths ("vLLM endpoint at host X serves model Y"), workflow habits. This section is almost always EMPTY — a fact qualifies only if it is clearly durable AND clearly not specific to this project. When in doubt, leave it out; the fact is still kept in the project sections above.
+
 - Output ONLY the markdown file, nothing else.`;
 
-const GLOBAL_MERGE_SYSTEM = `You maintain the GLOBAL memory vault of a coding agent — preferences and facts that apply to ALL projects, forever. You receive the CURRENT VAULT and a USER STATEMENT the user explicitly asked to remember permanently. Return the COMPLETE UPDATED VAULT as a flat markdown bullet list.
-Rules:
-- Rewrite the statement as one terse, general bullet.
-- Merge with existing bullets; deduplicate; if the new fact contradicts an old one, the new one wins.
-- Output ONLY the markdown, nothing else.`;
+/** Vault limits — enforced by the merge prompt and re-checked code-side. */
+const GLOBAL_MAX_BULLETS = 40;
+const GLOBAL_MAX_TOKENS = 1200;
+
+export const GLOBAL_SECTIONS = ["Preferences", "Environment", "Workflow", "Facts"];
+
+const GLOBAL_MERGE_SYSTEM = `You maintain the GLOBAL memory vault of a coding agent — durable knowledge injected into EVERY future session of EVERY project. You receive the CURRENT VAULT and CANDIDATE FACTS. Return the COMPLETE UPDATED VAULT, markdown, with exactly these sections:
+
+## Preferences   — how the user likes things done (tools, style, communication)
+## Environment   — durable machine/infrastructure truths: hosts, ports, endpoints, models served, hardware, installed tools
+## Workflow      — habits and processes the user follows across projects
+## Facts         — other durable cross-project truths
+
+Admission gate — a candidate enters the vault ONLY if ALL of these hold:
+- true independent of any single project (would still matter in a brand-new empty repo; the user's infrastructure, endpoints and tools DO qualify — only facts about one codebase's internals do not)
+- durable (not session or task state, not work in progress, not a one-off)
+- a fact or genuine user preference — never task narration or transient status
+Silently drop candidates that fail the gate.
+
+Curation — apply to the WHOLE vault on every write:
+- one terse, general bullet per fact; rewrite vague or verbose bullets
+- deduplicate aggressively; merge overlapping bullets into the stronger one
+- contradictions: the newer fact wins, delete the old
+- delete stale bullets (things that no longer hold or reference retired tools)
+- a section with no facts stays EMPTY: just the header, no bullets. NEVER write placeholder bullets like "none recorded" or "N/A"
+- do NOT store secrets, API keys, or passwords
+- hard cap: at most ${GLOBAL_MAX_BULLETS} bullets / ~${GLOBAL_MAX_TOKENS} tokens — drop the least valuable first
+
+Output ONLY the markdown file, nothing else.`;
 
 export class MemoryManager {
   private cwd: string;
@@ -139,18 +169,39 @@ export class MemoryManager {
       updated = stripFence(updated);
       // sanity: the model must return the sectioned file, otherwise keep the old one
       if (updated.includes("## Project facts")) {
+        // cross-project facts ride along in a trailer section — split them off
+        // so the local file stays clean, then promote them to the vault
+        const { local, candidates } = splitGlobalCandidates(updated);
+        updated = local;
         if (estimateTokens(updated) > this.settings.memory.maxTokens * 1.5) {
           updated = updated.slice(0, this.settings.memory.maxTokens * 6);
         }
         saveLocalMemory(this.cwd, updated);
         this.onUpdate?.("local");
         this.runScoring(updated, turnSummary);
+        if (candidates.length) await this.promoteGlobal(candidates);
       }
     } catch {
       // memory extraction must never break the session
     } finally {
       this.extracting = false;
     }
+  }
+
+  /** Auto-promotion: merge extractor-nominated cross-project facts into the
+   *  vault. Candidates already in the vault (lexically) are skipped so quiet
+   *  turns don't burn a model call re-proposing known facts. */
+  private async promoteGlobal(candidates: string[]): Promise<void> {
+    const vaultNorm = normalize(loadGlobalMemory());
+    const fresh = candidates.filter((c) => {
+      const n = normalize(c);
+      return n.length > 8 && !vaultNorm.includes(n);
+    });
+    if (fresh.length === 0) return;
+    const before = loadGlobalMemory();
+    const merged = await this.mergeGlobal(fresh.map((c) => `- ${c}`).join("\n"));
+    // the gate may reject every candidate — only announce real vault changes
+    if (merged && merged !== before) this.onNote?.("⚡ global memory updated");
   }
 
   /** Post-turn brain pass: reinforce fired memories, spread activation to
@@ -172,21 +223,54 @@ export class MemoryManager {
     }
   }
 
-  /** Explicit-trigger path: merge a fact into the global vault. */
+  /** Explicit-trigger path ("always remember…" / /remember): the statement
+   *  goes through the same gate + curation as auto-promoted facts. */
   async rememberGlobal(statement: string): Promise<string> {
+    return this.mergeGlobal(`- ${statement.replace(/\s+/g, " ").trim()}`);
+  }
+
+  /** One curating vault write: gate the candidates, dedupe/refresh the whole
+   *  vault, enforce the cap. Returns the new vault ("" if the write was
+   *  rejected as malformed). */
+  private async mergeGlobal(candidateBullets: string): Promise<string> {
     const current = loadGlobalMemory() || "(empty)";
     let updated = await this.client.oneShot(
       GLOBAL_MERGE_SYSTEM,
-      `CURRENT VAULT:\n${current}\n\nUSER STATEMENT:\n${statement}`,
+      `CURRENT VAULT:\n${current}\n\nCANDIDATE FACTS:\n${candidateBullets}`,
       2048,
     );
     updated = stripFence(updated);
-    if (updated.trim()) {
-      saveGlobalMemory(updated);
-      this.onUpdate?.("global");
+    // sanity: sectioned markdown or bust — never clobber the vault with junk
+    if (!updated.trim() || !updated.includes("## ")) return "";
+    if (estimateTokens(updated) > GLOBAL_MAX_TOKENS * 2) {
+      updated = updated.slice(0, GLOBAL_MAX_TOKENS * 8);
     }
+    saveGlobalMemory(updated);
+    this.onUpdate?.("global");
     return updated;
   }
+}
+
+/** Lexical fingerprint for cheap containment checks. */
+function normalize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Split the extractor's "## Global candidates" trailer off the local file. */
+export function splitGlobalCandidates(md: string): { local: string; candidates: string[] } {
+  const m = md.match(/^## Global candidates\s*$/im);
+  if (!m || m.index === undefined) return { local: md, candidates: [] };
+  const head = md.slice(0, m.index);
+  const tail = md.slice(m.index + m[0].length);
+  // trailer runs to the next section header (defensively) or EOF
+  const next = tail.search(/^## /m);
+  const body = next === -1 ? tail : tail.slice(0, next);
+  const rest = next === -1 ? "" : tail.slice(next);
+  const candidates = body
+    .split("\n")
+    .map((l) => l.replace(/^[-*]\s+/, "").trim())
+    .filter((l) => l && !l.startsWith("#") && !/^\(?(none|empty|n\/a)\)?\.?$/i.test(l));
+  return { local: (head + rest).trim(), candidates };
 }
 
 function stripFence(text: string): string {

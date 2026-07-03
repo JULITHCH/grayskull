@@ -17,6 +17,8 @@
   --bg: #010701; --panel: rgba(0,20,6,.72); --modal-bg: #020c04;
   --red: #ff2244; --amber: #ffaa00; --cyan: #00ddff; --purple: #cc88ff;
   --glow: rgba(0,255,102,.25); --sel: rgba(0,255,102,.10);
+  /* inherited by all dark themes; light themes override */
+  --code-bg: rgba(0,0,0,.4); --input-bg: rgba(0,0,0,.5);
 }
 [data-theme="monokai"] {
   --g: #a6e22e; --g-dim: #75715e; --g-faint: #3e3d32; --fg: #f8f8f2; --user: #66d9ef;
@@ -54,23 +56,56 @@
   --red: #ff3355; --amber: #ffcc00; --cyan: #6fffff; --purple: #7fa8ff;
   --glow: rgba(0,217,255,.25); --sel: rgba(0,217,255,.09);
 }
+[data-theme="business"] {
+  --g: #1e5aa8; --g-dim: #64748b; --g-faint: #d8dfe8; --fg: #1f2937; --user: #0f766e;
+  --bg: #eef1f5; --panel: rgba(255,255,255,.94); --modal-bg: #ffffff;
+  --red: #dc2626; --amber: #b45309; --cyan: #0e7490; --purple: #6d28d9;
+  --glow: rgba(30,90,168,.10); --sel: rgba(30,90,168,.06);
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --code-bg: #eef1f5; --input-bg: #ffffff;
+}
+/* business: strip the sci-fi chrome — no brackets, sweeps, flicker or glow */
+[data-theme="business"] .panel::before, [data-theme="business"] .panel::after { display: none; }
+[data-theme="business"] .panel { box-shadow: 0 1px 3px rgba(16,24,40,.10); border-radius: 6px; backdrop-filter: none; }
+[data-theme="business"] header { border-radius: 6px; }
+[data-theme="business"] header::before { display: none; }
+[data-theme="business"] header .logo { animation: none; text-shadow: none; letter-spacing: 2px; }
+[data-theme="business"] .chip, [data-theme="business"] #themeSel { border-radius: 4px; }
+[data-theme="business"] .chip.alert { text-shadow: none; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
   background: var(--bg); color: var(--fg);
-  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-family: var(--font, "JetBrains Mono", "Fira Code", ui-monospace, monospace);
   font-size: 13px; overflow: hidden;
   transition: background .4s;
 }
 #backdrop { position: fixed; inset: 0; z-index: 0; }
+/* zen: hide the whole GUI, leave only the backdrop (memory ocean) */
+#app { transition: opacity .6s; }
+body.zen #app { opacity: 0; pointer-events: none; }
+body.zen { cursor: grab; }
+body.zen.zdrag { cursor: grabbing; user-select: none; }
+#zenHint { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: none; color: var(--g-dim); border: 1px solid var(--g-faint); background: var(--panel);
+  padding: 4px 14px; font-size: 11px; letter-spacing: 2px; cursor: pointer; }
+body.zen #zenHint { display: block; }
 /* CRT scanlines — matrix + tron + synthwave only */
 [data-theme="matrix"] body::after, [data-theme="tron"] body::after, [data-theme="synthwave"] body::after {
   content: ""; position: fixed; inset: 0; z-index: 50; pointer-events: none;
   background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.14) 2px 4px);
 }
 #app { position: relative; z-index: 1; display: grid; height: 100vh; height: 100dvh;
-  grid-template-columns: 230px 1fr 430px; grid-template-rows: 46px 1fr; gap: 8px; padding: 8px; }
+  grid-template-columns: var(--colL, 230px) 5px 1fr 5px var(--colR, 430px); grid-template-rows: 46px 1fr; gap: 4px; padding: 8px; }
+/* ── draggable splitters (double-click resets) ── */
+.gutter { position: relative; z-index: 5; }
+.gutter.v { cursor: col-resize; grid-row: 2; }
+.gutter.h { cursor: row-resize; }
+.gutter::after { content: ""; position: absolute; background: var(--g-faint); transition: background .15s; }
+.gutter.v::after { inset: 0 2px; }
+.gutter.h::after { inset: 2px 0; }
+.gutter:hover::after, .gutter.drag::after { background: var(--g-dim); box-shadow: 0 0 6px var(--glow); }
 #tabs { display: none; }
 
 /* ── sci-fi panel chrome: corner brackets ── */
@@ -89,7 +124,7 @@ body {
   background: var(--g-faint); margin-right: 6px; vertical-align: 1px; }
 .panel h2 .led.on { background: var(--g); box-shadow: 0 0 6px var(--g); animation: pulse 1.4s infinite; }
 
-header { grid-column: 1 / 4; display: flex; align-items: center; gap: 12px;
+header { grid-column: 1 / 6; display: flex; align-items: center; gap: 12px;
   border: 1px solid var(--g-faint); background: var(--panel); padding: 0 14px; position: relative; overflow: hidden; }
 header::before { /* scan sweep */
   content: ""; position: absolute; top: 0; bottom: 0; width: 90px; pointer-events: none;
@@ -122,9 +157,13 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .sess .mchip.kami { color: var(--red); border-color: var(--red); }
 .sess .ctxMini { flex: 1; height: 3px; background: var(--g-faint); position: relative; }
 .sess .ctxMini i { position: absolute; inset: 0 auto 0 0; background: var(--g-dim); }
-#newSess { margin: 8px; padding: 6px; border: 1px dashed var(--g-dim); background: none; color: var(--g);
+#sessBtns { display: flex; gap: 6px; margin: 8px; }
+#sessBtns button { flex: 1; padding: 6px; border: 1px dashed var(--g-dim); background: none; color: var(--g);
   cursor: pointer; font-family: inherit; }
-#newSess:hover { background: var(--sel); }
+#sessBtns button:hover { background: var(--sel); }
+.sess.dorm { opacity: .55; }
+.sess.dorm:hover { opacity: .9; }
+.sess .title { color: var(--fg); }
 
 #main { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
 #transcript { flex: 1; overflow-y: auto; padding: 10px 14px; }
@@ -138,8 +177,8 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .item.ask { color: var(--user); }
 /* markdown bits inside messages */
 .item h1, .item h2, .item h3 { font-size: 13px; color: var(--g); margin: 4px 0; letter-spacing: 1px; }
-.item code { background: rgba(0,0,0,.35); border: 1px solid var(--g-faint); padding: 0 4px; font-size: 12px; }
-.item pre.code { background: rgba(0,0,0,.45); border: 1px solid var(--g-faint); border-left: 2px solid var(--g-dim);
+.item code { background: var(--code-bg); border: 1px solid var(--g-faint); padding: 0 4px; font-size: 12px; }
+.item pre.code { background: var(--code-bg); border: 1px solid var(--g-faint); border-left: 2px solid var(--g-dim);
   padding: 8px 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; position: relative; white-space: pre; }
 .item pre.code code { background: none; border: none; padding: 0; }
 .item pre.code .lang { position: absolute; top: 2px; right: 34px; font-size: 9px; color: var(--g-dim); }
@@ -150,7 +189,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .hl-n { color: var(--cyan); } .hl-f { color: var(--g); }
 /* tool cards */
 .tool-card { border: 1px solid var(--g-faint); border-left: 2px solid var(--g-dim); margin: 6px 0;
-  font-size: 12px; background: rgba(0,0,0,.25); }
+  font-size: 12px; background: var(--code-bg); }
 .tool-card .t-head { padding: 4px 8px; cursor: pointer; color: var(--g-dim); display: flex; gap: 6px; align-items: baseline; }
 .tool-card .t-head:hover { background: var(--sel); }
 .tool-card .t-name { color: var(--fg); }
@@ -186,7 +225,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .attach .x { cursor: pointer; color: var(--red); font-weight: 700; }
 #inputBar.dragover { box-shadow: inset 0 0 0 2px var(--user); }
 #inputBar { flex: 0 0 auto; border-top: 1px solid var(--g-faint); padding: 8px; display: flex; gap: 8px; align-items: flex-end; position: relative; }
-#promptInput { flex: 1; background: rgba(0,0,0,.5); color: var(--fg); border: 1px solid var(--g-dim);
+#promptInput { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 8px 10px; font-family: inherit; font-size: 13px; outline: none; resize: none;
   min-height: 36px; max-height: 160px; line-height: 1.45; }
 #promptInput:focus { box-shadow: 0 0 10px var(--glow); }
@@ -210,7 +249,25 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 #ctxBar { width: 110px; height: 8px; border: 1px solid var(--g-faint); position: relative; }
 #ctxFill { height: 100%; background: var(--g-dim); width: 0%; transition: width .5s; }
 
-#right { grid-row: 2; display: grid; grid-template-rows: 1fr 1fr 190px; gap: 8px; min-height: 0; }
+#right { grid-row: 2; display: grid; gap: 4px; min-height: 0;
+  grid-template-rows: var(--rowMesh, 1fr) 5px var(--rowMem, 1fr) 5px var(--rowOps, 150px) 5px minmax(90px, var(--rowAuto, 1fr)); }
+#autoBody { overflow-y: auto; flex: 1; padding: 6px 8px; font-size: 11px; }
+.aHead { color: var(--g); letter-spacing: 1px; font-size: 10px; margin: 4px 0 2px; }
+.aRow { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--g-faint); color: var(--g-dim); }
+.aRow .aName { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aRow .aSub { font-size: 10px; color: var(--g-dim); white-space: nowrap; }
+.aRow .aBtns { margin-left: auto; display: flex; gap: 5px; flex: 0 0 auto; }
+.aBtn { cursor: pointer; border: 1px solid var(--g-faint); padding: 0 5px; color: var(--g-dim); }
+.aBtn:hover { color: var(--g); border-color: var(--g); }
+.aDot { width: 7px; height: 7px; border-radius: 50%; background: var(--g-faint); flex: 0 0 7px; }
+.aDot.ok { background: var(--g); } .aDot.warn { background: var(--amber); } .aDot.err { background: var(--red); }
+.aDot.run { background: var(--cyan); animation: pulse 1s infinite; }
+.jobForm label { display: flex; flex-direction: column; gap: 3px; color: var(--g-dim); font-size: 11px; margin-bottom: 9px; }
+.jobForm input, .jobForm select, .jobForm textarea { background: var(--input-bg); color: var(--fg);
+  border: 1px solid var(--g-dim); padding: 5px 7px; font-family: inherit; font-size: 12px; outline: none; }
+.jobForm textarea { resize: vertical; min-height: 60px; }
+.jobForm .row2 { display: flex; gap: 10px; } .jobForm .row2 label { flex: 1; }
+.wcfgDesc { color: var(--g-dim); font-size: 10px; line-height: 1.5; white-space: normal; word-break: break-word; }
 #mesh { position: relative; }
 #meshSvg { width: 100%; height: 100%; }
 #memCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -262,13 +319,13 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 .modal h3 { padding: 8px 12px; border-bottom: 1px solid var(--g-faint); font-size: 13px; letter-spacing: 1px; color: var(--g); }
 .modal .body { padding: 12px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; flex: 1; color: var(--fg); }
 .modal .actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--g-faint); }
-.modal input { flex: 1; background: rgba(0,0,0,.5); color: var(--fg); border: 1px solid var(--g-dim);
+.modal input { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 6px 8px; font-family: inherit; outline: none; }
 .modal .key { color: var(--g); border: 1px solid var(--g-faint); padding: 0 4px; font-size: 10px; }
 
 /* ── command palette ── */
 #palette { width: min(560px, 92vw); }
-#palInput { width: 100%; background: rgba(0,0,0,.5); color: var(--fg); border: none;
+#palInput { width: 100%; background: var(--input-bg); color: var(--fg); border: none;
   border-bottom: 1px solid var(--g-faint); padding: 10px 12px; font-family: inherit; font-size: 14px; outline: none; }
 #palList { max-height: 320px; overflow-y: auto; }
 .pal-row { padding: 6px 12px; cursor: pointer; display: flex; gap: 10px; font-size: 12px; color: var(--g-dim); }
@@ -278,13 +335,13 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 /* ── chain editor ── */
 .cseHdr { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .cseHdr input, .cseHdr select, .cseRow input, .cseRow select {
-  background: rgba(0,0,0,.5); color: var(--fg); border: 1px solid var(--g-dim);
+  background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 4px 6px; font-family: inherit; font-size: 11px; outline: none; }
 .cseLegend { color: var(--g-dim); font-size: 10px; margin-bottom: 6px; letter-spacing: .5px; }
 .cseRow { display: flex; gap: 4px; align-items: center; margin-bottom: 5px; }
 .cseRow .step { flex: 1; min-width: 80px; }
 .cseRow .temp { flex: 0 0 58px; width: 58px; }
-.cseRow .mini { background: rgba(0,0,0,.4); color: var(--g); border: 1px solid var(--g-dim);
+.cseRow .mini { background: var(--input-bg); color: var(--g); border: 1px solid var(--g-dim);
   cursor: pointer; padding: 3px 7px; font-family: inherit; }
 .cseRow .mini:hover { border-color: var(--g); }
 .cseCard { border: 1px solid var(--g-faint); padding: 6px; margin-bottom: 7px; }
@@ -296,7 +353,7 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 .cseMcp { display: flex; gap: 12px; margin-top: 6px; align-items: flex-start; }
 .cseChk { display: flex; align-items: center; gap: 5px; color: var(--fg); font-size: 11px; white-space: nowrap; }
 .cseMcpOnly { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--g-dim); font-size: 10px; }
-.cseMcpOnly select[multiple], .cseSkills select[multiple] { background: rgba(0,0,0,.5); color: var(--fg);
+.cseMcpOnly select[multiple], .cseSkills select[multiple] { background: var(--input-bg); color: var(--fg);
   border: 1px solid var(--g-dim); font-family: inherit; font-size: 11px; outline: none; }
 .cseMcpOnly option:checked, .cseSkills option:checked { background: var(--g-faint); color: var(--fg); }
 #toast { position: fixed; bottom: 16px; right: 16px; z-index: 200; color: var(--red); display: none;
@@ -317,12 +374,14 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   header .logo { font-size: 13px; letter-spacing: 2px; }
   #modelChip, #clockChip { display: none; }
   #right { display: contents; }
-  #sessions, #main, #mesh, #memPanel, #ops { grid-row: 3; grid-column: 1; display: none; min-height: 0; }
+  .gutter { display: none !important; }
+  #sessions, #main, #mesh, #memPanel, #ops, #autoPanel { grid-row: 3; grid-column: 1; display: none; min-height: 0; }
   body[data-tab="chat"] #main { display: flex; }
   body[data-tab="sess"] #sessions { display: flex; }
   body[data-tab="mesh"] #mesh { display: flex; }
   body[data-tab="brain"] #memPanel { display: flex; }
   body[data-tab="ops"] #ops { display: flex; }
+  body[data-tab="auto"] #autoPanel { display: flex; }
   #tabs { display: flex; grid-row: 2; grid-column: 1; gap: 6px; }
   #tabs button { flex: 1; background: var(--panel); border: 1px solid var(--g-faint); color: var(--g-dim);
     font-family: inherit; font-size: 11px; letter-spacing: 1px; cursor: pointer; padding: 0; }
@@ -348,12 +407,13 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
     <div class="chip" id="legendChip" style="display:none;color:var(--amber);border-color:var(--amber)">★ legendary</div>
     <div class="chip" id="kamiChip" style="display:none">⚠ KAMIKAZEEE</div>
     <div style="flex:1"></div>
+    <div class="chip" id="zenBtn" title="hide the UI — watch the memory ocean (ctrl+.)">◱ ZEN</div>
     <div class="chip" id="paletteBtn" title="command palette (ctrl+k)">⌘K</div>
     <select id="themeSel" title="theme">
       <option value="matrix">matrix</option><option value="monokai">monokai</option>
       <option value="darcula">darcula</option><option value="dracula">dracula</option>
       <option value="nord">nord</option><option value="synthwave">synthwave</option>
-      <option value="tron">tron</option>
+      <option value="tron">tron</option><option value="business">business</option>
     </select>
     <div class="chip" id="clockChip">—:—</div>
     <div class="chip" id="connChip">connecting…</div>
@@ -362,8 +422,12 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   <div class="panel" id="sessions">
     <h2><span class="led" id="sessLed"></span>SESSIONS</h2>
     <div id="sessionList"></div>
-    <button id="newSess">+ NEW SESSION</button>
+    <div id="sessBtns">
+      <button id="newChat" title="folder-less quick chat">+ CHAT</button>
+      <button id="newSess" title="project session in a directory">+ PROJECT</button>
+    </div>
   </div>
+  <div class="gutter v" id="gutL" title="drag to resize · double-click to reset"></div>
 
   <div class="panel" id="main">
     <div id="transcript"><div id="items"></div><div id="live"></div></div>
@@ -385,25 +449,37 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
       <div style="flex:1"></div>
       <span id="busyTxt"></span>
       <span id="tpsTxt" title="decode throughput (completion tokens/sec)" style="margin-right:10px;color:var(--g-dim)"></span>
+      <span id="tokTxt" title="completion tokens this session (incl. background memory calls)" style="margin-right:10px;color:var(--g-dim)"></span>
       <div id="ctxBar" title="context fill"><div id="ctxFill"></div></div>
       <span id="ctxTxt">ctx 0%</span>
     </div>
   </div>
 
+  <div class="gutter v" id="gutR" title="drag to resize · double-click to reset"></div>
   <div id="right">
     <div class="panel" id="mesh">
       <h2><span class="led" id="meshLed"></span>AGENT MESH</h2>
       <svg id="meshSvg"></svg>
     </div>
+    <div class="gutter h" id="gutMesh" title="drag to resize · double-click to reset"></div>
     <div class="panel" id="memPanel" style="position:relative">
       <h2><span class="led" id="memLed"></span>MEMORY ACTIVATION <span class="toggle" id="memToggle">TEXT</span></h2>
       <canvas id="memCanvas"></canvas>
       <div id="memLegend"></div>
       <div id="memBody" style="display:none">(no session)</div>
     </div>
+    <div class="gutter h" id="gutMem" title="drag to resize · double-click to reset"></div>
     <div class="panel" id="ops">
       <h2><span class="led" id="opsLed"></span>CHAIN // TODO</h2>
       <div id="opsBody">(idle)</div>
+    </div>
+    <div class="gutter h" id="gutOps" title="drag to resize · double-click to reset"></div>
+    <div class="panel" id="autoPanel">
+      <h2><span class="led" id="autoLed"></span>WORKERS // JOBS
+        <span class="toggle" id="newJobBtn" title="schedule a recurring job">+ JOB</span>
+        <span class="toggle" id="newWorkerBtn" title="let the agent build a new worker plugin" style="margin-right:6px">+ WORKER</span>
+      </h2>
+      <div id="autoBody">(loading…)</div>
     </div>
   </div>
 
@@ -413,8 +489,10 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
     <button data-tab="mesh">MESH</button>
     <button data-tab="brain">BRAIN</button>
     <button data-tab="ops">OPS</button>
+    <button data-tab="auto">AUTO</button>
   </nav>
 </div>
+<div id="zenHint" onclick="toggleZen(false)">MEMORY OCEAN — <span style="color:var(--amber)">◉ global</span> · <span style="color:var(--cyan)">● local</span> — drag to rotate · scroll to zoom · esc to return</div>
 
 <div class="modal-bg" id="nodeModalBg"><div class="modal">
   <h3 id="nodeModalTitle">node</h3>
@@ -466,6 +544,84 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   </div>
 </div></div>
 
+<div class="modal-bg" id="wcfgModalBg"><div class="modal" style="width:min(560px,92vw)">
+  <h3 id="wcfgTitle">CONFIGURE WORKER</h3>
+  <div class="body jobForm" id="wcfgBody"></div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('wcfgModalBg')">CANCEL</button>
+    <button class="btn" onclick="saveWorkerCfg()">SAVE</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="wrunModalBg"><div class="modal" style="width:min(560px,92vw)">
+  <h3 id="wrunTitle">RUN WORKER ONCE</h3>
+  <div class="body jobForm">
+    <label>task for this run
+      <textarea id="wrunTask" rows="4" placeholder="e.g. Post: deployment finished, all systems green"></textarea>
+    </label>
+  </div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('wrunModalBg')">CANCEL</button>
+    <button class="btn" onclick="submitWorkerRun()">▶ RUN</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="nworkerModalBg"><div class="modal" style="width:min(560px,92vw)">
+  <h3>NEW WORKER</h3>
+  <div class="body jobForm">
+    <label>describe what the worker should do
+      <textarea id="nworkerDesc" rows="4" placeholder="e.g. ein Worker, der Artikel auf LinkedIn posten kann"></textarea>
+    </label>
+    <div class="aSub">The agent builds the plugin in the current chat session and will ask you there for any credentials it needs.</div>
+  </div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('nworkerModalBg')">CANCEL</button>
+    <button class="btn" onclick="submitNewWorker()">BUILD</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="jobModalBg"><div class="modal" style="width:min(620px,92vw)">
+  <h3 id="jobTitle">SCHEDULE JOB</h3>
+  <div class="body jobForm">
+    <div class="row2">
+      <label>job name<input id="jobName" placeholder="weekly-linkedin-article"></label>
+      <label>worker<select id="jobWorker"></select></label>
+    </div>
+    <label>task on every run
+      <textarea id="jobTask" rows="4" placeholder="e.g. Schreibe einen frischen ~300-Wörter-Artikel über KI-Trends und poste ihn"></textarea>
+    </label>
+    <div class="row2">
+      <label>every<select id="jobEvery">
+        <option>30m</option><option>1h</option><option>2h</option><option>6h</option>
+        <option>12h</option><option selected>1d</option><option>1w</option>
+      </select></label>
+      <label>at (1d/1w)<input id="jobAt" type="time"></label>
+      <label>weekday (1w)<select id="jobWeekday">
+        <option value="">—</option><option>mon</option><option>tue</option><option>wed</option>
+        <option>thu</option><option>fri</option><option>sat</option><option>sun</option>
+      </select></label>
+    </div>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="jobEnabled" checked style="flex:0 0 auto">enabled</label>
+  </div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('jobModalBg')">CANCEL</button>
+    <button class="btn" onclick="saveJob()">SAVE</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="jlogModalBg"><div class="modal" style="width:min(760px,94vw)">
+  <h3 id="jlogTitle">JOB LOG</h3>
+  <div class="body"><pre id="jlogBody" style="white-space:pre-wrap;font-size:11px"></pre></div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('jlogModalBg')">CLOSE</button>
+  </div>
+</div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -475,18 +631,44 @@ const S = {
   transcripts: {},   // sid -> array of rendered item HTML
   streams: {},       // sid -> {text, reason}
   status: {},        // sid -> status msg
+  busyStart: {},     // sid -> local Date.now() when the busy stretch started
   nodes: {},         // sid -> Map(nodeId -> {label, kind, state, log:[]})
   memory: {},        // sid -> {global, local, graph}
   pendingPerm: null, pendingAsk: null,
   chainEdit: null,
+  auto: { workers: [], jobs: [] },   // workers + scheduled jobs (server-global)
+  runningJobs: new Set(),            // job names currently executing
+  wcfgName: null, wrunName: null, jlogName: null,   // dialog targets
   openTools: new Set(),  // "sid:idx" keys of expanded tool cards
   stick: true,           // auto-scroll pinned to bottom
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const fmtTok = (n) => n < 1000 ? String(Math.max(0, Math.round(n))) : n < 1e6 ? (n / 1000).toFixed(n < 1e5 ? 1 : 0) + "k" : (n / 1e6).toFixed(1) + "M";
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m" + String(s % 60).padStart(2, "0") + "s";
+  return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
+}
+/** Track the local start of a session's busy stretch; `busyMs` (server-side
+ *  elapsed) seeds it for browsers that connect mid-turn. */
+function trackBusy(sid, busy, busyMs) {
+  if (busy) S.busyStart[sid] ??= Date.now() - (busyMs ?? 0);
+  else delete S.busyStart[sid];
+}
+/** "12s · 1.2k tok" progress suffix for the busy indicators. */
+function busyProgress(sid) {
+  const st = S.status[sid] ?? {};
+  const parts = [];
+  if (S.busyStart[sid]) parts.push(fmtElapsed(Date.now() - S.busyStart[sid]));
+  if (st.turnTokens > 0) parts.push(fmtTok(st.turnTokens) + " tok");
+  return parts.join(" · ");
+}
 
 /* ═══════════ themes ═══════════ */
-const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron"];
+const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron", "business"];
 function setTheme(t) {
   if (!THEMES.includes(t)) t = "matrix";
   document.documentElement.dataset.theme = t;
@@ -497,7 +679,11 @@ function setTheme(t) {
 $("themeSel").onchange = () => setTheme($("themeSel").value);
 
 /* ═══════════ backdrop: matrix rain / starfield + global memory constellation ═══════════ */
-const bd = { canvas: null, ctx: null, cols: [], stars: [], mem: [], themeDirty: true, t: 0 };
+const bd = {
+  canvas: null, ctx: null, cols: [], stars: [], mem: [], themeDirty: true, t: 0,
+  // zen 3D camera: drag = yaw/pitch, wheel = dist, slow auto-spin when idle
+  yaw: 0.4, pitch: -0.12, dist: 3, vyaw: 0.0012, dragging: false, lx: 0, ly: 0,
+};
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function hexA(hex, a) {
   hex = hex.trim();
@@ -535,6 +721,7 @@ function bdBuildMemory() {
         dx: (((h >> 8) & 255) / 255 - 0.5) * 0.00012,
         dy: (((h >> 16) & 255) / 255 - 0.5) * 0.00012,
         hot: false,
+        ...mem3dCoords(h),
       });
     });
   bullets(m.global, "global");
@@ -549,9 +736,19 @@ function bdBuildMemory() {
       dx: (((h >> 8) & 255) / 255 - 0.5) * 0.0002,
       dy: (((h >> 16) & 255) / 255 - 0.5) * 0.0002,
       hot: n.score >= 1.5,
+      ...mem3dCoords(h),
     });
   }
   bd.mem = nodes.slice(0, 70);
+}
+/** Stable 3D position on a jittered sphere shell, derived from the text hash —
+ *  the zen ocean rotates this cloud around the origin. */
+function mem3dCoords(h) {
+  const u = ((h >> 3) & 0xffff) / 0xffff;            // azimuth
+  const v = ((h >> 11) & 0xffff) / 0xffff;           // inclination (area-fair)
+  const r = 0.55 + (((h >> 21) & 0xff) / 255) * 0.45; // shell jitter
+  const th = u * 6.2832, ph = Math.acos(2 * v - 1);
+  return { X: r * Math.sin(ph) * Math.cos(th), Y: r * Math.cos(ph) * 0.8, Z: r * Math.sin(ph) * Math.sin(th) };
 }
 function bdFrame() {
   const c = bd.canvas, ctx = bd.ctx;
@@ -561,9 +758,11 @@ function bdFrame() {
   const acc = cssVar("--g") || "#00ff66";
   const cyan = cssVar("--cyan") || "#00ddff";
   const W = c.width, H = c.height;
+  const zenMode = document.body.classList.contains("zen");
   if (theme === "matrix") {
-    // classic rain, fading trail
-    ctx.fillStyle = "rgba(1,7,1,.12)"; ctx.fillRect(0, 0, W, H);
+    // classic rain, fading trail — zen fades hard so the rotating 3D labels
+    // don't smear ghost copies across the screen
+    ctx.fillStyle = zenMode ? "rgba(1,7,1,.45)" : "rgba(1,7,1,.12)"; ctx.fillRect(0, 0, W, H);
     ctx.font = "14px monospace";
     const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ01GRAYSKULL";
     for (let i = 0; i < bd.cols.length; i++) {
@@ -591,8 +790,18 @@ function bdFrame() {
     }
   }
   // ── memory constellation (all themes): global vault + hot local memories ──
-  if (bd.mem.length) {
-    ctx.font = "9px monospace";
+  if (bd.mem.length && zenMode) {
+    // zen: rotatable 3D cloud — drag to spin, wheel to zoom, idles slowly
+    bdFrame3d(ctx, W, H, cssVar("--amber") || "#ffaa00", acc, cyan);
+  } else if (bd.mem.length) {
+    // zen mode: the GUI is gone, the ocean is the show — bigger, brighter
+    const zen = false;
+    const boost = zen ? 2.2 : 1;
+    const alpha = (a) => Math.min(1, a * boost);
+    // global vault entries are beacons: amber, so they never drown in the
+    // rain (--g) or among the cyan local nodes
+    const gold = cssVar("--amber") || "#ffaa00";
+    ctx.font = zen ? "12px monospace" : "9px monospace";
     // faint links between neighbouring constellation nodes
     ctx.lineWidth = 1;
     for (let i = 0; i < bd.mem.length; i++) {
@@ -603,32 +812,118 @@ function bdFrame() {
         const dx = (a.x - b.x) * W, dy = (a.y - b.y) * H;
         const d2 = dx * dx + dy * dy;
         if (d2 < 26000) {
-          ctx.strokeStyle = hexA(a.hot || b.hot ? cyan : acc, 0.10 * (1 - d2 / 26000));
+          const lcol = a.kind === "global" || b.kind === "global" ? gold : a.hot || b.hot ? cyan : acc;
+          ctx.strokeStyle = hexA(lcol, alpha(0.10) * (1 - d2 / 26000));
           ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
         }
       }
     }
     for (const n of bd.mem) {
       const x = n.x * W, y = n.y * H;
-      const col = n.kind === "global" ? acc : cyan;
+      const col = n.kind === "global" ? gold : cyan;
+      if (n.kind === "global") {
+        // always-lit beacon with a slow pulse halo and readable label
+        const pulse = 0.6 + 0.4 * Math.sin(bd.t * 0.03 + hash32(n.text) % 7);
+        const rr = (zen ? 22 : 13) * pulse;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
+        g.addColorStop(0, hexA(col, zen ? 0.35 : 0.22)); g.addColorStop(1, hexA(col, 0));
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = hexA(col, 0.95);
+        ctx.beginPath(); ctx.arc(x, y, zen ? 3.4 : 2.6, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = hexA(col, zen ? 0.9 : 0.5);
+        ctx.fillText(n.text.slice(0, zen ? 70 : 34), x + 7, y - 6);
+        continue;
+      }
       if (n.hot) {
         const pulse = 0.5 + 0.5 * Math.sin(bd.t * 0.08 + hash32(n.text) % 7);
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 16);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 16 * boost);
         g.addColorStop(0, hexA(col, 0.35 * pulse)); g.addColorStop(1, hexA(col, 0));
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 16, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 16 * boost, 0, 6.2832); ctx.fill();
         ctx.fillStyle = hexA(col, 0.9);
-        ctx.beginPath(); ctx.arc(x, y, 2.4, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, 0.55);
-        ctx.fillText(n.text.slice(0, 34), x + 6, y - 5);
+        ctx.beginPath(); ctx.arc(x, y, zen ? 3.2 : 2.4, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = hexA(col, alpha(0.55));
+        ctx.fillText(n.text.slice(0, zen ? 60 : 34), x + 6, y - 5);
       } else {
-        ctx.fillStyle = hexA(col, n.kind === "global" ? 0.4 : 0.3);
-        ctx.beginPath(); ctx.arc(x, y, 1.7, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, 0.16);
-        ctx.fillText(n.text.slice(0, 26), x + 5, y - 4);
+        ctx.fillStyle = hexA(col, alpha(n.kind === "global" ? 0.4 : 0.3));
+        ctx.beginPath(); ctx.arc(x, y, zen ? 2.2 : 1.7, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = hexA(col, alpha(0.16));
+        ctx.fillText(n.text.slice(0, zen ? 48 : 26), x + 5, y - 4);
       }
     }
   }
 }
+
+/** Zen ocean, 3D: perspective-projected memory cloud around the origin.
+ *  Far nodes fade and shrink; labels only on the near hemisphere. */
+function bdFrame3d(ctx, W, H, gold, acc, cyan) {
+  if (!bd.dragging) bd.yaw += bd.vyaw;
+  const cy = Math.cos(bd.yaw), sy = Math.sin(bd.yaw);
+  const cp = Math.cos(bd.pitch), sp = Math.sin(bd.pitch);
+  const fov = Math.min(W, H) * 0.85;
+  const proj = bd.mem.map((n) => {
+    const x1 = n.X * cy + n.Z * sy, z1 = -n.X * sy + n.Z * cy;
+    const y1 = n.Y * cp - z1 * sp, z2 = n.Y * sp + z1 * cp;
+    const p = fov / (bd.dist - z2);
+    // t: 0 = far side of the cloud, 1 = nearest to the camera
+    const t = Math.max(0, Math.min(1, (z2 + 1) / 2));
+    return { x: W / 2 + x1 * p, y: H / 2 + y1 * p, t };
+  });
+  // links by TRUE 3D proximity so the web holds its shape while rotating
+  ctx.lineWidth = 1;
+  for (let i = 0; i < bd.mem.length; i++) {
+    const a = bd.mem[i];
+    for (let j = i + 1; j < bd.mem.length; j++) {
+      const b = bd.mem[j];
+      const dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > 0.5) continue;
+      const A = proj[i], B = proj[j];
+      const lcol = a.kind === "global" || b.kind === "global" ? gold : a.hot || b.hot ? cyan : acc;
+      ctx.strokeStyle = hexA(lcol, (0.05 + 0.3 * Math.min(A.t, B.t)) * (1 - d2 / 0.5));
+      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    }
+  }
+  // painter's order: far nodes first so near ones draw on top
+  const order = bd.mem.map((n, i) => i).sort((i, j) => proj[i].t - proj[j].t);
+  for (const i of order) {
+    const n = bd.mem[i], q = proj[i];
+    const col = n.kind === "global" ? gold : cyan;
+    const depth = 0.45 + 0.55 * q.t;
+    const r = (n.kind === "global" ? 3 : n.hot ? 2.4 : 1.8) * (0.5 + q.t * 1.3);
+    if (n.kind === "global" || n.hot) {
+      const pulse = 0.6 + 0.4 * Math.sin(bd.t * 0.05 + hash32(n.text) % 7);
+      const rr = r * 7 * pulse;
+      const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr);
+      g.addColorStop(0, hexA(col, 0.3 * depth)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, 6.2832); ctx.fill();
+    }
+    ctx.fillStyle = hexA(col, 0.95 * depth);
+    ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 6.2832); ctx.fill();
+    if (q.t > 0.3) {
+      ctx.font = `${Math.round(9 + q.t * 4)}px monospace`;
+      ctx.fillStyle = hexA(col, (n.kind === "global" ? 0.9 : 0.55) * q.t);
+      ctx.fillText(n.text.slice(0, n.kind === "global" ? 70 : 48), q.x + r + 4, q.y - 4);
+    }
+  }
+}
+
+/* zen camera controls: drag rotates, wheel zooms — active only in zen */
+addEventListener("pointerdown", (e) => {
+  if (!document.body.classList.contains("zen") || e.target.closest("#zenHint")) return;
+  bd.dragging = true; bd.lx = e.clientX; bd.ly = e.clientY;
+  document.body.classList.add("zdrag");
+});
+addEventListener("pointermove", (e) => {
+  if (!bd.dragging) return;
+  bd.yaw += (e.clientX - bd.lx) * 0.005;
+  bd.pitch = Math.max(-1.4, Math.min(1.4, bd.pitch + (e.clientY - bd.ly) * 0.005));
+  bd.lx = e.clientX; bd.ly = e.clientY;
+});
+addEventListener("pointerup", () => { bd.dragging = false; document.body.classList.remove("zdrag"); });
+addEventListener("wheel", (e) => {
+  if (!document.body.classList.contains("zen")) return;
+  bd.dist = Math.max(1.7, Math.min(6, bd.dist + e.deltaY * 0.002));
+}, { passive: true });
 
 /* ═══════════ websocket ═══════════ */
 function connect() {
@@ -645,7 +940,8 @@ function handle(m) {
     case "hello": S.defaultCwd = m.defaultCwd; break;
     case "sessions":
       S.sessions = m.list;
-      if (!S.current && m.list.length) S.current = m.list[m.list.length - 1].sid;
+      // default to a live session; parked ones need an explicit resume click
+      if (!S.current && m.list.length) S.current = (m.list.filter((s) => !s.dormant).pop() ?? m.list[0]).sid;
       renderSessions(); renderAll(); break;
     case "replay":
       S.transcripts[m.sid] = [];
@@ -655,9 +951,26 @@ function handle(m) {
     case "delta": stream(m.sid).text += m.text; renderLiveMaybe(m.sid); break;
     case "reasoning": stream(m.sid).reason = (stream(m.sid).reason + m.text).slice(-500); renderLiveMaybe(m.sid); break;
     case "stream_end": S.streams[m.sid] = { text: "", reason: "" }; renderLiveMaybe(m.sid); break;
-    case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; renderSessions(); renderStatus(); if (m.sid === S.current) renderLive(); break;
-    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); renderSessions(); renderStatus(); renderOps(); if (m.sid === S.current) renderLive(); break;
+    case "busy": (S.status[m.sid] ??= {}).busy = m.busy; (S.status[m.sid]).what = m.what; trackBusy(m.sid, m.busy, m.busyMs); renderSessions(); renderStatus(); if (m.sid === S.current) renderLive(); break;
+    case "status": S.status[m.sid] = Object.assign(S.status[m.sid] ?? {}, m); trackBusy(m.sid, m.busy, m.busyMs); renderSessions(); renderStatus(); renderOps(); if (m.sid === S.current) renderLive(); break;
+    case "tok": {
+      const st = (S.status[m.sid] ??= {});
+      st.tokens = m.tokens; st.turnTokens = m.turnTokens; st.tps = m.tps;
+      if (st.busy) trackBusy(m.sid, true, m.busyMs);
+      renderSessions(); renderStatus(); if (m.sid === S.current) renderLive();
+      break;
+    }
     case "memory": S.memory[m.sid] = m; renderMemory(); if (m.sid === S.current) bdBuildMemory(); break;
+    case "sess_title": { const s = S.sessions.find((x) => x.sid === m.sid); if (s) { s.title = m.title; renderSessions(); } break; }
+    case "job":
+      if (m.state === "start") S.runningJobs.add(m.job); else S.runningJobs.delete(m.job);
+      toast(`⚙ ${m.job}: ${m.state}${m.summary ? " — " + String(m.summary).slice(0, 140) : ""}`);
+      jlogAppend(m.job, m.state === "start" ? "── run started ──" : `── ${m.state.toUpperCase()}${m.summary ? ": " + m.summary : ""} ──`);
+      renderAuto();
+      break;
+    case "auto": S.auto = { workers: m.workers ?? [], jobs: m.jobs ?? [] }; renderAuto(); break;
+    case "job_log": openJobLogModal(m.name, m.text); break;
+    case "job_note": jlogAppend(m.job, m.text); break;
     case "agent": agentEvent(m.sid, m.ev); break;
     case "perm_req": S.pendingPerm = m; showPerm(); break;
     case "ask_req": S.pendingAsk = m; showAsk(); break;
@@ -677,16 +990,29 @@ function handle(m) {
 const stream = (sid) => (S.streams[sid] ??= { text: "", reason: "" });
 
 /* ═══════════ sessions ═══════════ */
+function sessLabel(s) {
+  if (s.kind === "chat") return "💬 " + (s.title || "new chat");
+  const base = (s.cwd || "").split("/").filter(Boolean).pop() || s.sid;
+  return (s.origin === "cli" ? "⌨ " : "") + base;
+}
 function renderSessions() {
   const anyBusy = S.sessions.some((s) => S.status[s.sid]?.busy);
   $("sessLed").className = "led" + (anyBusy ? " on" : "");
   $("sessionList").innerHTML = S.sessions.map((s) => {
+    if (s.dormant) {
+      // parked on disk — click resumes with full transcript + conversation
+      return `<div class="sess dorm" onclick="resumeSession('${s.sid}')" title="saved session — click to resume">
+        <div class="sid">▸ ${esc(sessLabel(s))}<span class="sessClose" onclick="deleteSession('${s.sid}', event)" title="delete saved session permanently">✕</span></div>
+        ${s.kind === "chat" ? "" : `<div class="cwd">${esc(s.cwd)}</div>`}
+        <div class="meta"><span class="mchip">saved${s.updatedAt ? " · " + new Date(s.updatedAt).toLocaleDateString() : ""}</span></div>
+      </div>`;
+    }
     const st = S.status[s.sid] ?? {};
-    const closeBtn = s.origin === "cli" ? "" : `<span class="sessClose" onclick="closeSession('${s.sid}', event)" title="close session (frees its MCP servers)">✕</span>`;
+    const closeBtn = s.origin === "cli" ? "" : `<span class="sessClose" onclick="closeSession('${s.sid}', event)" title="close session (parks it in the list, resumable)">✕</span>`;
     const mode = st.mode ?? s.mode ?? "";
-    return `<div class="sess ${s.sid === S.current ? "active" : ""}" onclick="selectSession('${s.sid}')">
-      <div class="sid">${s.origin === "cli" ? "⌨ " : ""}${s.sid} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + "</span>" : ""}${closeBtn}</div>
-      <div class="cwd">${esc(s.cwd)}</div>
+    return `<div class="sess ${s.sid === S.current ? "active" : ""}" onclick="selectSession('${s.sid}')" title="${esc(s.cwd || "")}">
+      <div class="sid">${esc(sessLabel(s))} ${st.busy ? '<span class="busy">⣾ ' + esc(st.what || "working") + (busyProgress(s.sid) ? " · " + busyProgress(s.sid) : "") + "</span>" : ""}${closeBtn}</div>
+      ${s.kind === "chat" ? "" : `<div class="cwd">${esc(s.cwd)}</div>`}
       <div class="meta">
         ${mode ? `<span class="mchip ${mode === "kamikazeee" ? "kami" : ""}">${esc(mode)}</span>` : ""}
         <span class="ctxMini" title="context fill"><i style="width:${st.ctxPct ?? 0}%"></i></span>
@@ -694,15 +1020,182 @@ function renderSessions() {
   }).join("");
 }
 function selectSession(sid) { S.current = sid; S.openTools.clear(); renderSessions(); renderAll(); bdBuildMemory(); }
+function resumeSession(sid) { S.current = sid; send({ t: "resume_session", sid }); }
+function deleteSession(sid, ev) {
+  ev.stopPropagation();
+  if (!confirm("Delete this saved session permanently? Its transcript and conversation are removed from disk.")) return;
+  send({ t: "delete_session", sid });
+  if (S.current === sid) S.current = null;
+}
 function closeSession(sid, ev) {
   ev.stopPropagation();
-  if (!confirm(`Close session ${sid}? Its transcript and MCP servers are torn down.`)) return;
+  if (!confirm(`Close session ${sid}? It stays in the list and can be resumed; its MCP servers are freed.`)) return;
   send({ t: "close_session", sid });
   if (S.current === sid) S.current = null;
 }
 $("newSess").onclick = () => {
   const cwd = prompt("project directory:", S.defaultCwd);
   if (cwd) send({ t: "new_session", cwd });
+};
+$("newChat").onclick = () => send({ t: "new_session", kind: "chat" });
+
+/* ═══════════ workers & jobs (automation panel + dialogs) ═══════════ */
+const fmtRel = (ts) => {
+  const d = ts - Date.now();
+  if (d <= 0) return "due";
+  if (d < 3_600_000) return "in " + Math.round(d / 60_000) + "m";
+  if (d < 86_400_000) return "in " + (d / 3_600_000).toFixed(1).replace(/\.0$/, "") + "h";
+  return "in " + Math.round(d / 86_400_000) + "d";
+};
+function renderAuto() {
+  const a = S.auto;
+  $("autoLed").className = "led" + (S.runningJobs.size ? " on" : "");
+  let h = '<div class="aHead">WORKERS</div>';
+  h += a.workers.map((w) => `
+    <div class="aRow" title="${esc(w.description)}">
+      <span class="aDot ${S.runningJobs.has("worker:" + w.name) ? "run" : w.configured ? "ok" : "warn"}"></span>
+      <span class="aName">${esc(w.name)}</span>
+      ${w.configured ? "" : '<span class="aSub">needs config</span>'}
+      <span class="aBtns">
+        <span class="aBtn" onclick="openWorkerCfg('${w.name}')" title="configure credentials">⚙</span>
+        <span class="aBtn" onclick="openWorkerRun('${w.name}')" title="run once now">▶</span>
+        <span class="aBtn" onclick="workerDelete('${w.name}')" title="delete worker + config">✕</span>
+      </span>
+    </div>`).join("") || '<div class="aSub">no workers yet — + WORKER lets the agent build one</div>';
+  h += '<div class="aHead" style="margin-top:8px">JOBS</div>';
+  h += a.jobs.map((j) => {
+    const dot = S.runningJobs.has(j.name) ? "run" : !j.enabled ? "" : j.lastStatus === "error" ? "err" : "ok";
+    const sched = `${j.every}${j.weekday ? " " + j.weekday : ""}${j.at ? " " + j.at : ""}`;
+    const next = j.enabled ? fmtRel(j.nextRun) : "off";
+    return `
+    <div class="aRow" title="${esc(j.task)}${j.lastSummary ? "\nlast: " + esc(j.lastSummary) : ""}">
+      <span class="aDot ${dot}"></span>
+      <span class="aName">${esc(j.name)}</span>
+      <span class="aSub">→ ${esc(j.worker)} · ${esc(sched)} · ${next}</span>
+      <span class="aBtns">
+        <span class="aBtn" onclick="send({t:'job_run',name:'${j.name}'});send({t:'job_log_req',name:'${j.name}'})" title="run now (opens live log)">▶</span>
+        <span class="aBtn" onclick="send({t:'job_toggle',name:'${j.name}',enabled:${!j.enabled}})" title="${j.enabled ? "disable" : "enable"}">${j.enabled ? "⏸" : "⏻"}</span>
+        <span class="aBtn" onclick="openJobEditor('${j.name}')" title="edit">✎</span>
+        <span class="aBtn" onclick="send({t:'job_log_req',name:'${j.name}'})" title="log">≡</span>
+        <span class="aBtn" onclick="jobDelete('${j.name}')" title="delete">✕</span>
+      </span>
+    </div>`;
+  }).join("") || '<div class="aSub">no jobs yet — + JOB schedules a worker</div>';
+  $("autoBody").innerHTML = h;
+}
+
+/** Live log modal: opened with a snapshot (jobs) or empty (one-off worker
+ *  runs); job_note broadcasts append while the run streams. */
+function openJobLogModal(name, text) {
+  S.jlogName = name;
+  $("jlogTitle").textContent = (S.runningJobs.has(name) ? "LIVE — " : "LOG — ") + name;
+  $("jlogBody").textContent = text;
+  $("jlogModalBg").classList.add("open");
+  const body = $("jlogBody").parentElement;
+  body.scrollTop = body.scrollHeight;
+}
+function jlogAppend(job, text) {
+  if (!$("jlogModalBg").classList.contains("open") || S.jlogName !== job) return;
+  $("jlogBody").textContent += ($("jlogBody").textContent ? "\n" : "") + text;
+  const body = $("jlogBody").parentElement;
+  body.scrollTop = body.scrollHeight;
+}
+function openWorkerCfg(name) {
+  const w = S.auto.workers.find((x) => x.name === name);
+  if (!w) return;
+  S.wcfgName = name;
+  $("wcfgTitle").textContent = "CONFIGURE — " + name;
+  $("wcfgBody").innerHTML = w.fields.length
+    ? w.fields.map((f, i) => `
+      <label><span>${esc(f.key)}${f.secret ? ' <span class="aSub">🔒</span>' : ""}${f.set ? ' <span class="aSub">(set — leave empty to keep)</span>' : ""}</span>
+        <div class="wcfgDesc">${esc(f.description)}</div>
+        <input id="wcfg_${i}" type="${f.secret ? "password" : "text"}" placeholder="${f.set ? "unchanged" : ""}" autocomplete="off">
+      </label>`).join("")
+    : '<div class="aSub">this worker needs no configuration</div>';
+  $("wcfgModalBg").classList.add("open");
+}
+function saveWorkerCfg() {
+  const w = S.auto.workers.find((x) => x.name === S.wcfgName);
+  if (w) {
+    const values = {};
+    w.fields.forEach((f, i) => { const v = $("wcfg_" + i)?.value; if (v) values[f.key] = v; });
+    if (Object.keys(values).length) send({ t: "worker_cfg_save", name: w.name, values });
+  }
+  closeModal("wcfgModalBg");
+}
+function workerDelete(name) {
+  if (confirm(`Delete worker "${name}" and its stored credentials?`)) send({ t: "worker_delete", name });
+}
+function openWorkerRun(name) {
+  const w = S.auto.workers.find((x) => x.name === name);
+  if (w && !w.configured) return openWorkerCfg(name);
+  S.wrunName = name;
+  $("wrunTitle").textContent = "RUN ONCE — " + name;
+  $("wrunTask").value = "";
+  $("wrunModalBg").classList.add("open");
+  $("wrunTask").focus();
+}
+function submitWorkerRun() {
+  const task = $("wrunTask").value.trim();
+  closeModal("wrunModalBg");
+  if (task && S.wrunName) {
+    send({ t: "worker_run", name: S.wrunName, task });
+    openJobLogModal("worker:" + S.wrunName, "⚙ " + task); // progress streams in live
+  }
+}
+function openNewWorker() {
+  if (!S.current || S.sessions.find((s) => s.sid === S.current)?.dormant) return toast("open a session first — the agent builds the worker in chat");
+  $("nworkerDesc").value = "";
+  $("nworkerModalBg").classList.add("open");
+  $("nworkerDesc").focus();
+}
+function submitNewWorker() {
+  const desc = $("nworkerDesc").value.trim();
+  if (desc) {
+    send({ t: "prompt", sid: S.current, text:
+      `Erstelle einen neuen Worker (create_worker): ${desc}\n` +
+      "Deklariere alle benötigten Credentials/IDs als config_fields, frage mich nach den Werten (ask_user) und speichere sie mit worker_config. Teste den Worker anschließend mit run_worker und melde das Ergebnis." });
+    document.body.dataset.tab = "chat"; // mobile: jump to the conversation
+  }
+  closeModal("nworkerModalBg");
+}
+function openJobEditor(name) {
+  const j = S.auto.jobs.find((x) => x.name === name);
+  $("jobTitle").textContent = j ? "EDIT JOB — " + name : "SCHEDULE JOB";
+  $("jobWorker").innerHTML = S.auto.workers.map((w) =>
+    `<option${w.configured ? "" : " disabled"}>${esc(w.name)}${w.configured ? "" : " (needs config)"}</option>`).join("");
+  $("jobName").value = j?.name ?? "";
+  $("jobName").disabled = !!j;
+  if (j) $("jobWorker").value = j.worker;
+  $("jobTask").value = j?.task ?? "";
+  $("jobEvery").value = j?.every ?? "1d";
+  $("jobAt").value = j?.at ?? "";
+  $("jobWeekday").value = j?.weekday ?? "";
+  $("jobEnabled").checked = j ? !!j.enabled : true;
+  $("jobModalBg").classList.add("open");
+}
+function saveJob() {
+  const every = $("jobEvery").value;
+  let at = $("jobAt").value;
+  const weekday = $("jobWeekday").value;
+  if (every === "1w" && weekday && !at) at = "09:00"; // weekly needs a time anchor
+  const job = {
+    name: $("jobName").value.trim(), worker: ($("jobWorker").value || "").replace(/ \(needs config\)$/, ""),
+    task: $("jobTask").value.trim(), every,
+    ...(at ? { at } : {}), ...(weekday ? { weekday } : {}),
+    enabled: $("jobEnabled").checked,
+  };
+  if (!job.name || !job.task || !job.worker) return toast("job needs name, worker and task");
+  send({ t: "job_save", job });
+  closeModal("jobModalBg");
+}
+function jobDelete(name) {
+  if (confirm(`Delete job "${name}"?`)) send({ t: "job_delete", name });
+}
+$("newWorkerBtn").onclick = openNewWorker;
+$("newJobBtn").onclick = () => {
+  if (!S.auto.workers.some((w) => w.configured)) return toast("no configured worker yet — create/configure one first");
+  openJobEditor(null);
 };
 
 /* ═══════════ markdown-lite + syntax highlight ═══════════ */
@@ -851,7 +1344,7 @@ function renderLive() {
   $("live").innerHTML =
     (st.reason && !st.text ? `<div class="reason">${esc(st.reason.split("\n").slice(-3).join("\n"))}</div>` : "") +
     (st.text ? `<div class="stream cursor">${esc(st.text)}</div>` : "") +
-    (stat.busy ? `<div class="working">${SPIN[spinFrame]} ${esc(stat.what || "working")}… <span class="hint">(esc)</span><span class="cancel" onclick="interrupt()">✕ CANCEL</span></div>` : "");
+    (stat.busy ? `<div class="working">${SPIN[spinFrame]} ${esc(stat.what || "working")}… <span class="hint">${busyProgress(sid)}</span> <span class="hint">(esc)</span><span class="cancel" onclick="interrupt()">✕ CANCEL</span></div>` : "");
   $("stopBtn").classList.toggle("armed", !!stat.busy);
   maybeScroll();
 }
@@ -868,7 +1361,7 @@ $("transcript").addEventListener("scroll", () => {
 $("scrollPill").onclick = () => { S.stick = true; maybeScroll(); };
 setInterval(() => {
   const stat = S.status[S.current] ?? {};
-  if (stat.busy) { spinFrame = (spinFrame + 1) % SPIN.length; renderLive(); }
+  if (stat.busy) { spinFrame = (spinFrame + 1) % SPIN.length; renderLive(); renderBusyTxt(); }
 }, 110);
 let liveRaf = null;
 function renderLiveMaybe(sid) {
@@ -990,13 +1483,32 @@ document.querySelectorAll(".modeBtn").forEach((b) => {
 });
 addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === ".") { e.preventDefault(); toggleZen(); return; }
   if (e.key === "Escape") {
+    if (document.body.classList.contains("zen")) return toggleZen(false);
     if ($("paletteBg").classList.contains("open")) return closeModal("paletteBg");
+    // automation dialogs close on esc instead of interrupting the session
+    for (const id of ["wcfgModalBg", "wrunModalBg", "nworkerModalBg", "jobModalBg", "jlogModalBg"]) {
+      if ($(id).classList.contains("open")) return closeModal(id);
+    }
     if (!S.pendingPerm && !S.pendingAsk && !$("chainModalBg").classList.contains("open")) interrupt();
   }
 });
 
+/* ═══════════ zen: hide the GUI, float in the memory ocean ═══════════ */
+function toggleZen(on) {
+  const zen = on ?? !document.body.classList.contains("zen");
+  document.body.classList.toggle("zen", zen);
+  if (zen) document.activeElement?.blur?.();
+}
+$("zenBtn").onclick = () => toggleZen();
+
 /* ═══════════ status ═══════════ */
+function renderBusyTxt() {
+  const st = S.status[S.current] ?? {};
+  const prog = st.busy ? busyProgress(S.current) : "";
+  $("busyTxt").textContent = st.busy ? "⣾ " + (st.what || "working") + (prog ? " · " + prog : "") + " " : "";
+}
 function renderStatus() {
   const st = S.status[S.current] ?? {};
   $("modelChip").textContent = "model: " + (st.model ? st.model.split("/").pop() : "—");
@@ -1007,7 +1519,8 @@ function renderStatus() {
   $("ctxFill").style.background = (st.ctxPct ?? 0) > 70 ? "var(--amber)" : "var(--g-dim)";
   $("ctxTxt").textContent = "ctx " + (st.ctxPct ?? 0) + "%";
   $("tpsTxt").textContent = st.tps ? st.tps + " tok/s" : "";
-  $("busyTxt").textContent = st.busy ? "⣾ " + (st.what || "working") + " " : "";
+  $("tokTxt").textContent = st.tokens ? "Σ " + fmtTok(st.tokens) + " tok" : "";
+  renderBusyTxt();
   document.querySelectorAll(".modeBtn").forEach((b) => b.classList.toggle("active", b.dataset.mode === st.mode));
   const kami = st.mode === "kamikazeee";
   $("kamiChip").style.display = kami ? "" : "none";
@@ -1299,9 +1812,15 @@ let palSel = 0;
 function palActions() {
   const acts = [];
   for (const s of S.sessions) acts.push({ k: "session", label: `${s.sid} — ${s.cwd}`, run: () => selectSession(s.sid) });
-  acts.push({ k: "session", label: "+ new session", run: () => $("newSess").onclick() });
+  acts.push({ k: "session", label: "+ new project session", run: () => $("newSess").onclick() });
+  acts.push({ k: "session", label: "+ new chat (no folder)", run: () => $("newChat").onclick() });
   for (const t of THEMES) acts.push({ k: "theme", label: `theme: ${t}`, run: () => setTheme(t) });
   for (const [c, d] of SLASH_COMMANDS) acts.push({ k: "command", label: `${c} — ${d}`, run: () => { $("promptInput").value = c + " "; $("promptInput").focus(); } });
+  acts.push({ k: "action", label: "◱ zen — memory ocean (ctrl+.)", run: () => toggleZen() });
+  acts.push({ k: "auto", label: "⚙ + new worker (agent builds it)", run: openNewWorker });
+  acts.push({ k: "auto", label: "⚙ + new job (schedule a worker)", run: () => $("newJobBtn").onclick() });
+  for (const w of S.auto.workers) acts.push({ k: "auto", label: `⚙ run worker: ${w.name}`, run: () => openWorkerRun(w.name) });
+  for (const j of S.auto.jobs) acts.push({ k: "auto", label: `⚙ run job now: ${j.name}`, run: () => send({ t: "job_run", name: j.name }) });
   acts.push({ k: "action", label: "⛔ interrupt running task", run: interrupt });
   acts.push({ k: "action", label: "⛓ edit chains (/tc edit)", run: () => S.current && send({ t: "prompt", sid: S.current, text: "/tc edit" }) });
   return acts;
@@ -1493,6 +2012,50 @@ function renderOps() {
   }
   $("opsBody").innerHTML = html || "(idle — chains and todos appear here live)";
 }
+
+/* ═══════════ resizable panels (splitters) ═══════════ */
+(function initGutters() {
+  const DEFAULTS = { colL: "230px", colR: "430px", rowMesh: "1fr", rowMem: "1fr", rowOps: "150px" };
+  let vars = { ...DEFAULTS };
+  try { vars = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("gs_layout") || "{}") }; } catch {}
+  const apply = () => { for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty("--" + k, v); };
+  apply();
+  const persist = () => { try { localStorage.setItem("gs_layout", JSON.stringify(vars)); } catch {} };
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  let raf = null;
+  const refresh = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; dispatchEvent(new Event("resize")); }); };
+
+  // each gutter: compute its var from the pointer position; dblclick resets
+  const HANDLERS = {
+    gutL:    (e) => { vars.colL = clamp(e.clientX - $("app").getBoundingClientRect().left - 8, 140, innerWidth * 0.4) + "px"; },
+    gutR:    (e) => { vars.colR = clamp($("app").getBoundingClientRect().right - e.clientX - 8, 240, innerWidth * 0.6) + "px"; },
+    gutMesh: (e) => { vars.rowMesh = clamp(e.clientY - $("mesh").getBoundingClientRect().top, 60, innerHeight * 0.6) + "px"; },
+    gutMem:  (e) => { vars.rowMem = clamp(e.clientY - $("memPanel").getBoundingClientRect().top, 60, innerHeight * 0.6) + "px"; },
+    gutOps:  (e) => { vars.rowOps = clamp(e.clientY - $("ops").getBoundingClientRect().top, 50, innerHeight * 0.6) + "px"; },
+  };
+  const RESETS = { gutL: ["colL"], gutR: ["colR"], gutMesh: ["rowMesh"], gutMem: ["rowMem"], gutOps: ["rowOps"] };
+  for (const [id, onMove] of Object.entries(HANDLERS)) {
+    const el = $(id);
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add("drag");
+      const move = (ev) => { onMove(ev); apply(); refresh(); };
+      const up = () => {
+        el.classList.remove("drag");
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        persist(); refresh();
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+    });
+    el.addEventListener("dblclick", () => {
+      for (const k of RESETS[id]) vars[k] = DEFAULTS[k];
+      apply(); persist(); refresh();
+    });
+  }
+})();
 
 /* ═══════════ mobile tabs ═══════════ */
 document.body.dataset.tab = "chat";

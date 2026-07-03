@@ -60,6 +60,22 @@ const MODE_STYLE: Record<PermissionMode, { label: string; color: string }> = {
 };
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** Compact token count: "842", "12.3k", "1.2M". */
+export function fmtTok(n: number): string {
+  if (n < 1000) return String(Math.max(0, Math.round(n)));
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 100_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** Elapsed busy time, compact: "7s", "1m32s", "1h04m". */
+export function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+}
 const STREAM_TAIL_LINES = 8;
 const STREAM_FLUSH_MS = 80;
 // a single keystroke chunk bigger than this (or with a newline) is a paste
@@ -156,6 +172,10 @@ export function App(props: AppProps): React.ReactElement {
   const draftRef = useRef("");
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busyRef = useRef(false);
+  // wall-clock start of the current busy stretch, for the elapsed timer
+  const busyStartRef = useRef(0);
+  // session token count at busy start — busy line shows tokens generated since
+  const busyTokSnapRef = useRef(0);
 
   const pushItem = (item: TranscriptItem) => {
     link?.publish({ t: "item", item });
@@ -193,6 +213,9 @@ export function App(props: AppProps): React.ReactElement {
       // real turn-busy, not the queue-drain flag (runningRef is still true when
       // a turn ends inside the drain loop, which would stick the web UI on "working")
       busy: busyRef.current,
+      busyMs: busyRef.current ? Date.now() - busyStartRef.current : 0,
+      tokens: client.sessionTokens(),
+      turnTokens: busyRef.current ? client.sessionTokens() - busyTokSnapRef.current : 0,
       ctxPct: Math.min(100, Math.round((client.lastPromptTokens / settings.contextWindow) * 100)),
       tps: Math.round(client.lastTokensPerSec),
       mcp: [...mcp.statuses.values()].map((s) => ({ name: s.name, state: s.state, tools: s.toolCount })),
@@ -287,6 +310,10 @@ export function App(props: AppProps): React.ReactElement {
         link?.publish({ t: "ask_req", reqId, question, options: options ?? null });
       });
     bridge.setBusy = (b, what) => {
+      if (b && !busyRef.current) {
+        busyStartRef.current = Date.now();
+        busyTokSnapRef.current = client.sessionTokens();
+      }
       busyRef.current = b;
       setBusy(b);
       setBusyWhat(what ?? "");
@@ -354,7 +381,21 @@ export function App(props: AppProps): React.ReactElement {
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(() => setSpin((s) => (s + 1) % SPINNER.length), 90);
-    return () => clearInterval(t);
+    // mirror elapsed/token progress to the web hub so a browser watching this
+    // CLI session sees the counters move (or freeze, when something hangs)
+    const tok = setInterval(() => {
+      link?.publish({
+        t: "tok",
+        tokens: client.sessionTokens(),
+        turnTokens: client.sessionTokens() - busyTokSnapRef.current,
+        tps: Math.round(client.lastTokensPerSec),
+        busyMs: Date.now() - busyStartRef.current,
+      });
+    }, 1000);
+    return () => {
+      clearInterval(t);
+      clearInterval(tok);
+    };
   }, [busy]);
 
   const submitToAgent = (text: string, images: string[] = [], display?: string) => {
@@ -641,7 +682,7 @@ export function App(props: AppProps): React.ReactElement {
       {busy && (
         <Box marginTop={1}>
           <Text color="magenta">
-            {SPINNER[spin]} {busyWhat || "working"}… <Text dimColor>(esc to interrupt)</Text>
+            {SPINNER[spin]} {busyWhat || "working"}… <Text dimColor>{fmtElapsed(Date.now() - busyStartRef.current)} · {fmtTok(client.sessionTokens() - busyTokSnapRef.current)} tok · (esc to interrupt)</Text>
           </Text>
         </Box>
       )}
@@ -680,7 +721,7 @@ export function App(props: AppProps): React.ReactElement {
           {memFlash ? `${memFlash} · ` : ""}
           {todoOpen > 0 ? `todo ${todoOpen} · ` : ""}
           {tps > 0 ? `${tps} tok/s · ` : ""}
-          ctx {ctxPct}% · mcp {mcpConnected}/{mcp.statuses.size}
+          Σ {fmtTok(client.sessionTokens())} tok · ctx {ctxPct}% · mcp {mcpConnected}/{mcp.statuses.size}
         </Text>
       </Box>
     </Box>

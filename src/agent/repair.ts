@@ -123,6 +123,11 @@ export function recoverTextToolCall(
   }
   const json = recoverJsonToolCall(text, knownTools);
   if (json) return json;
+  // the markdown-link / pythonic form Qwen3.6 derails into; tried before the
+  // XML-ish recovery because `[bash](command="<a>b</a>")` would otherwise have
+  // its quoted value misread as argument tags
+  const kwargs = recoverKwargsToolCall(text, knownTools);
+  if (kwargs) return kwargs;
   // last resort: the loose XML-ish dialect some Qwen3.6 builds derail into
   return recoverXmlNamedToolCall(text, knownTools);
 }
@@ -186,6 +191,98 @@ function recoverXmlNamedToolCall(text: string, knownTools: Set<string>): ToolCal
     type: "function",
     function: { name: marker.name, arguments: JSON.stringify(args) },
   };
+}
+
+/**
+ * Recover the markdown-link / pythonic call syntax Qwen3.6 emits when it
+ * derails: `[bash](command="find src -name '*.ts'", timeout_seconds=10)`,
+ * also seen without the brackets (`bash(command="ls")`). Fires only when a
+ * known tool name is immediately followed by `(` and the parens contain at
+ * least one `key=value` kwarg — a bare mention like `read(path)` in prose
+ * never matches. String values honour quotes with backslash escapes; bare
+ * values are JSON-typed when they parse, kept as strings otherwise.
+ */
+function recoverKwargsToolCall(text: string, knownTools: Set<string>): ToolCall | null {
+  for (const t of knownTools) {
+    const re = new RegExp(`(?:\\[${escapeRe(t)}\\]|\\b${escapeRe(t)})\\(`, "g");
+    for (const m of text.matchAll(re)) {
+      const args = parseKwargs(text, m.index + m[0].length);
+      if (args) {
+        return {
+          id: "recovered_0",
+          type: "function",
+          function: { name: t, arguments: JSON.stringify(args) },
+        };
+      }
+    }
+  }
+  return null;
+}
+
+const KWARG_ESCAPES: Record<string, string> = { n: "\n", t: "\t", r: "\r", '"': '"', "'": "'", "\\": "\\" };
+
+/** Parse `key=value(, key=value)*)` starting just after the opening paren.
+ *  Returns null unless at least one kwarg parses and the closing `)` is found. */
+function parseKwargs(text: string, pos: number): Record<string, unknown> | null {
+  const args: Record<string, unknown> = {};
+  let i = pos;
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i]!)) i++;
+  };
+  for (;;) {
+    ws();
+    const key = /^[A-Za-z_][\w-]*/.exec(text.slice(i))?.[0];
+    if (!key) return null;
+    i += key.length;
+    ws();
+    if (text[i] !== "=") return null;
+    i++;
+    ws();
+    const q = text[i];
+    if (q === '"' || q === "'") {
+      i++;
+      let val = "";
+      for (;;) {
+        if (i >= text.length) return null; // unterminated string
+        const c = text[i]!;
+        if (c === "\\" && i + 1 < text.length) {
+          const esc = text[i + 1]!;
+          val += KWARG_ESCAPES[esc] ?? "\\" + esc;
+          i += 2;
+        } else if (c === q) {
+          i++;
+          break;
+        } else {
+          val += c;
+          i++;
+        }
+      }
+      args[key] = val;
+    } else {
+      // bare value: read to the next top-level `,` or `)`
+      let depth = 0;
+      const start = i;
+      while (i < text.length) {
+        const c = text[i]!;
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") {
+          if (depth === 0 && c === ")") break;
+          depth--;
+        } else if (c === "," && depth === 0) break;
+        i++;
+      }
+      const raw = text.slice(start, i).trim();
+      if (!raw) return null;
+      coerceArg(args, key, raw);
+    }
+    ws();
+    if (text[i] === ",") {
+      i++;
+      continue;
+    }
+    if (text[i] === ")") return Object.keys(args).length > 0 ? args : null;
+    return null;
+  }
 }
 
 function recoverJsonToolCall(text: string, knownTools: Set<string>): ToolCall | null {
