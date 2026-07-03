@@ -304,6 +304,27 @@ Three layers that catch weak-model mistakes mechanically:
   online (searxng) first. Config: `"stuckResearch": { "enabled", "editThreshold",
   "repeatThreshold" }`.
 
+## Visual-verification gate
+
+Weak models fix rendering bugs blind: edit, re-read their own edit, declare "fixed" —
+without ever rendering a frame. GRAYSKULL blocks that mechanically (`agent/visual.ts`):
+when a turn is **visual** (the prompt carries an image or rendering vocabulary —
+clipping, overlap, drawn, canvas, sprite, … en/de) and the model **edited code but
+never observed the result** (no playwright call *after* the last edit), the tool loop
+refuses to end the turn once and injects the procedure instead: start the app, load it
+headless, click the canvas (WebGL wake-up), **assert the complaint numerically** via
+`browser_evaluate` (adding a `window.__game`-style debug hook to the code if state
+isn't reachable), screenshot for the human, and only report what was *observed*. A
+`👁 … verification forced` note shows when it fires. Kill switch:
+`"visualVerify": { "enabled": false }`.
+
+The **canvastest** skill (installed globally, also in `examples/skills/`) carries the
+full canvas/WebGL playbook the gate points at: state instrumentation, tile/bbox
+invariants ("entity center on a walkable tile", "sprite bbox ≤ tile size"), the
+PixiJS-headless black-screen workaround, pixel fallbacks, and the common geometry root
+causes (sprite bigger than corridor, spawn constants on wall tiles, center-point
+collision vs bbox-sized sprites).
+
 ## Browser testing (Playwright MCP)
 
 The seeded global settings include a `playwright` MCP server

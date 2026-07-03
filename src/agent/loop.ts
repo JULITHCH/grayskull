@@ -11,6 +11,7 @@ import { needsCompaction, compact, memorySwap } from "./compact";
 import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, loadSkills, type SkillDef } from "../skills/registry";
 import { StuckTracker } from "./stuck";
+import { VisualVerifyGate } from "./visual";
 import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
 import type { ModelPreset } from "../config/settings";
@@ -66,6 +67,10 @@ export async function runToolLoop(opts: {
   /** drains harness-side nudges (e.g. stuck-detection → auto-research); each
    *  is appended verbatim as a user message before the next model call */
   drainNudges?: () => string[];
+  /** called when the model is about to end the turn (no tool calls); a
+   *  returned string is appended as a user message and the loop continues —
+   *  used by the visual-verify gate to block unverified "fixed" claims */
+  beforeFinal?: () => string | null;
   /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
   maxTurns?: number;
   /** unattended run (kamikazeee): the iteration cap warns instead of stopping —
@@ -153,6 +158,12 @@ export async function runToolLoop(opts: {
       }
       if (result.finishReason === "length") {
         ctx.note(`⚠ output still truncated after ${MAX_LENGTH_CONTINUES} continues — ending the turn`);
+      }
+      // harness gate: refuse to end the turn when a visual claim is unverified
+      const block = opts.beforeFinal?.();
+      if (block) {
+        messages.push({ role: "user", content: block });
+        continue;
       }
       ranOut = false;
       break;
@@ -433,10 +444,13 @@ export class GrayskullAgent {
     this.memory = opts.memory;
     this.ui = opts.ui;
     this.stuck = new StuckTracker(opts.settings.stuckResearch);
+    this.visual = new VisualVerifyGate(opts.settings.visualVerify);
   }
 
   /** stuck detection → auto web-research nudge (see agent/stuck.ts) */
   private stuck: StuckTracker;
+  /** blocks unverified "fixed" claims on visual work (see agent/visual.ts) */
+  private visual: VisualVerifyGate;
 
   stop(): void {
     this.abort?.abort();
@@ -609,6 +623,8 @@ export class GrayskullAgent {
     this.ui.setBusy(true, randomQuip());
     // repeated problem report / episode reset (arms an auto-research nudge)
     this.stuck.notePrompt(userText);
+    // visual turn? (image attached or rendering vocabulary) → verify gate arms
+    this.visual.notePrompt(userText, images.length > 0);
 
     // explicit-trigger path → global vault
     if (detectGlobalTrigger(userText, this.settings.memory.globalTriggers)) {
@@ -762,6 +778,14 @@ export class GrayskullAgent {
         turnLog.push(`stuck-detection fired: ${nudge.reason} — auto-research nudge injected`);
         return [nudge.text];
       },
+      beforeFinal: () => {
+        const block = this.visual.beforeFinal();
+        if (block) {
+          this.ui.pushItem({ type: "note", text: "👁 visual work edited but never rendered → verification forced (playwright)" });
+          turnLog.push("visual-verify gate fired: unverified visual claim blocked, render+assert procedure injected");
+        }
+        return block;
+      },
       messages,
       ctx,
       signal,
@@ -774,7 +798,9 @@ export class GrayskullAgent {
       onToolEvent: (item) => {
         this.ui.pushItem(item);
         if (item.state === "done") {
-          if (this.registry.get(item.name)?.kind === "edit") this.stuck.noteEdit();
+          const kind = this.registry.get(item.name)?.kind ?? "";
+          this.visual.noteTool(item.name, kind);
+          if (kind === "edit") this.stuck.noteEdit();
           const isWeb = item.name.startsWith("mcp__searxng__");
           const resultSnippet = isWeb ? `\nresult: ${(item.result ?? "").slice(0, 3000)}` : "";
           turnLog.push(`tool ${item.detail}${resultSnippet}`);

@@ -33,6 +33,12 @@ rendered dimmed, never scanned for tool calls.
   before each request → `GrayskullAgent.compactInLoop` splices `messages` in place
   (keeps the system message, swaps the conversation tail) so a long single turn frees
   its own window.
+- `agent/visual.ts` — visual-verify gate: visual turn (prompt image or rendering
+  vocabulary en/de) + edits + no `mcp__playwright__*` call after the last edit →
+  `runToolLoop`'s `beforeFinal` hook blocks the turn-ending reply once and injects
+  a render+instrument+assert procedure (window.__game debug hook, browser_evaluate
+  invariants, screenshot). Config `visualVerify.enabled`; `canvastest` skill
+  (examples/skills/) is the deep playbook. Born from the pacman5 postmortem.
 - `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
   (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
   in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`

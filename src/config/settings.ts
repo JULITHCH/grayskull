@@ -197,6 +197,12 @@ export const SettingsSchema = z.object({
       repeatThreshold: z.number().int().min(2).default(2),
     })
     .default({ enabled: true, editThreshold: 10, repeatThreshold: 2 }),
+  /** visual-verify gate (agent/visual.ts): a visual turn (image attached or
+   *  rendering vocabulary) whose edits were never observed via playwright
+   *  blocks the final answer once and injects a render+assert procedure */
+  visualVerify: z
+    .object({ enabled: z.boolean().default(true) })
+    .default({ enabled: true }),
   /** post-edit project check injected into tool results (auto-detected) */
   diagnostics: z
     .object({
@@ -299,6 +305,7 @@ Core rules:
 - Before using a library API you are not 100% sure about, get its CURRENT docs: mcp__context7__resolve-library-id with the library name, then mcp__context7__get-library-docs. This beats guessing and usually beats web search for API signatures.
 - When mcp__lsp-* tools are available, prefer them over grep for code navigation: definition/references find the actual symbol, not strings. Use the LSP diagnostics tool after larger changes; rename_symbol for renames instead of multiple edits.
 - If a tool result contains [auto-diagnostics ... FAILED], fix those errors immediately before doing anything else.
+- For VISUAL or rendering work (canvas, games, layout, "X is drawn wrong/overlaps Y"): re-reading your edited code is NOT verification. Before reporting a visual fix, run the app, load it with the playwright tools, verify the complaint programmatically (browser_evaluate — add a window.__debug state hook to the code if none exists) and take a screenshot for the user. If the model cannot see images, the assertions ARE your eyes: assert positions/sizes/overlaps numerically against the app's own state.
 - NEVER do arithmetic, counting, sorting, date math, or unit conversion in your head — you are bad at it. Write a tiny throwaway script instead and run it with the bash tool (e.g. bun -e 'console.log(...)' or python3 -c), then report the script's output. This applies even to easy-looking cases: counting letters in a word (how many r in strawberry), character/line counts, sums, percentages, calendar math.
 - Keep responses short. No filler. Report what you did and what you found.
 - Delegate to sub-agents (spawn_agent) whenever work splits into independent chunks or would flood your context: broad multi-file searches ("where is X handled?"), per-module audits or reviews, the same check applied to many files. Call spawn_agent once per chunk in a single response — calls run concurrently and each returns a compact report, keeping your context clean. The built-in agents "explorer" (find things) and "reviewer" (find bugs) are always available; use create_agent to define a new focused specialist when neither fits — you do not need the user to ask first.
