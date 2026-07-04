@@ -251,6 +251,12 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
      assert zero 180° flips outside mode switches, and net displacement ≥ 3 tiles
      per ghost per 3s window. A ghost oscillating on one tile is a broken opposite()
      or a decision taken every frame instead of at tile centers.
+   Report each assert with its MEASURED number (e.g. "ArrowLeft: dx=-42 ✓") — an
+   assert you did not actually run and measure is a FAILING assert; never present
+   the list as passed without the numbers. If you add extra input paths (touch,
+   swipe, gamepad), keyboard comes FIRST and every path must feed the same buffered
+   nextDir; test the keyboard path on its own — a working swipe handler can mask a
+   keyboard that is wired to nothing.
 
 Common root causes to check when "X is drawn on/over Y" in tile games:
 - sprite radius/bbox larger than the tile (e.g. radius 20 in a 32px cell → guaranteed overlap)
