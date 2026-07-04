@@ -29,6 +29,18 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    ```
    Closure-local state is unverifiable; this hook is the difference between guessing
    and knowing. Keep it — it is not dirt, it is testability.
+   If a state variable ever gets REASSIGNED (arrays rebuilt on reset/respawn, e.g.
+   `ghosts = makeGhosts()`), a plain property snapshot goes stale and you will chase
+   phantom nulls. Expose getters instead — always safe, costs nothing:
+   ```js
+   window.__game = {
+     get ghosts() { return ghosts; },
+     get player() { return player; },
+     get state()  { return gameState; },
+     forceWin()   { /* eat all but one pellet */ },
+     forceDeath() { /* teleport a ghost onto the player */ },
+   };
+   ```
 
 4. **Assert the actual complaint numerically** with `browser_evaluate`. Patterns for
    grid/tile games — adapt to the app's structures:
@@ -135,9 +147,9 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    Fix the MAP DATA until this passes — hand-author the layout row by row if generation
    fights you; a known-good hardcoded classic layout beats a broken generator.
    For a PACMAN-STYLE game, do not author the maze from scratch: start from this
-   reference layout (28×30; W wall, `.` pellet, `o` power pellet, `-` ghost-house door,
-   space = walkable empty; row 14 is the wrap tunnel; validated: symmetric, no dead
-   ends, no open fields, all 238 pellets + 4 power pellets reachable):
+   reference layout (28 cols × 31 rows; W wall, `.` pellet, `o` power pellet, `-`
+   ghost-house door, space = walkable empty; validated: symmetric, no dead ends, no
+   open fields, all 240 pellets + 4 power pellets reachable):
    ```
    WWWWWWWWWWWWWWWWWWWWWWWWWWWW
    W............WW............W
@@ -153,7 +165,8 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    WWWWWW.WW          WW.WWWWWW
    WWWWWW.WW WWW--WWW WW.WWWWWW
    WWWWWW.WW W      W WW.WWWWWW
-         .   W      W   .      
+   WWWWWW.WW W      W WW.WWWWWW
+         .   WWWWWWWW   .      
    WWWWWW.WW WWWWWWWW WW.WWWWWW
    WWWWWW.WW          WW.WWWWWW
    WWWWWW.WW WWWWWWWW WW.WWWWWW
@@ -170,9 +183,15 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    W............WW............W
    WWWWWWWWWWWWWWWWWWWWWWWWWWWW
    ```
-   Ghost house interior is rows 13–14, cols 11–16; door on row 12; spawn Pac-Man near
-   row 22 center. Copy it VERBATIM (28 chars per row — run the validator to prove you
-   did), then adapt tile ids to your engine. Entity
+   Geography, so nothing gets placed wrong: the ghost-house INTERIOR is rows 13–14,
+   cols 11–16 (spawn all four ghosts there); the door is row 12, cols 13–14; the wrap
+   TUNNEL is row 15 and is fully walled off from the house — no entity belongs on row
+   15 at start. Pac-Man spawns on row 23 (the `o..` row), center. Copy the layout
+   VERBATIM — row 15 has 6 leading AND 6 trailing spaces, every row is exactly 28
+   chars; run the validator to prove the copy — then adapt tile ids to your engine.
+   Pellet/row counts are whatever the validator reports — there is no magic number to
+   hit beyond the checks passing; never invent numeric targets and fight the map to
+   reach them. Entity
    visibility belongs here too: after starting the game, assert the player and every
    enemy is inside the playfield bounds and actually drawn (position within canvas,
    not NaN, not stuck at an off-screen HUD coordinate).
