@@ -570,6 +570,9 @@ export class GrayskullAgent {
       content: [
         base,
         this.legendary ? loadLegendaryMode() : "",
+        // proactive verification contract on visual turns — the blocking gate
+        // alone only teaches the model AFTER it tried to finish shallowly
+        this.visual.systemHint(),
         `# Environment\n${env}`,
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",
