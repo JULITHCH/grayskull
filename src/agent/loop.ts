@@ -115,7 +115,11 @@ export async function runToolLoop(opts: {
     const result = await client.complete(
       messages,
       schemas,
-      { onTextDelta: opts.onTextDelta, onReasoningDelta: opts.onReasoningDelta },
+      {
+        onTextDelta: opts.onTextDelta,
+        onReasoningDelta: opts.onReasoningDelta,
+        onStallRetry: (attempt) => ctx.note(`⟳ model stream stalled mid-response — retrying (attempt ${attempt + 1})`),
+      },
       signal,
     );
     let { toolCalls } = result;

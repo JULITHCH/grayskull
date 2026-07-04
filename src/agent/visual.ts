@@ -66,9 +66,17 @@ export class VisualVerifyGate {
       "is not reachable from the console, first add a small debug hook in the code (e.g. " +
       "window.__game = { player, ghosts, map, tileSize }) — then assert the real invariant, e.g. every entity's " +
       "tile is walkable (not a wall) and each sprite's bounding box fits inside its tile.\n" +
-      "4. Take a screenshot with mcp__playwright__browser_take_screenshot (filename under .grayskull/screenshots/) " +
-      "and give the user the path.\n" +
-      "5. Report what the assertions and the screenshot SHOWED. If the problem is still there, keep fixing — " +
+      "4. For a GAME or interactive app, verifying one movement is NOT enough — exercise the core loop end to end, " +
+      "using mcp__playwright__browser_press_key (REAL key events; a synthetic dispatchEvent can pass while real " +
+      "keyboard input is broken). Sample the debug hook before/after and assert the deltas that define 'playable': " +
+      "the score INCREASES after moving through collectibles; every enemy/NPC leaves its spawn pen within ~10s of " +
+      "game start (poll twice, 5s apart — identical positions = stuck AI, a bug); the player never stops dead " +
+      "against open corridor; the lose path works (force a collision via the hook if needed → life lost) and the " +
+      "win path is reachable (e.g. temporarily set all-but-one collectibles eaten via the hook, eat the last one, " +
+      "assert the win state fires). Fix and re-verify anything that fails.\n" +
+      "5. Take a screenshot with mcp__playwright__browser_take_screenshot (filename under .grayskull/screenshots/) " +
+      "and give the user the path — for games, one screenshot mid-gameplay (after input), not just the start screen.\n" +
+      "6. Report what the assertions and the screenshot SHOWED. If the problem is still there, keep fixing — " +
       "do not report success. If a canvastest or webtest skill is available, the skill tool has the full playbook.]"
     );
   }

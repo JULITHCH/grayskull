@@ -7,6 +7,9 @@ export interface StreamCallbacks {
   onTextDelta?: (delta: string) => void;
   /** --reasoning-parser qwen3 streams think-block tokens separately */
   onReasoningDelta?: (delta: string) => void;
+  /** a stalled stream is being retried; partial output already shown is void
+   *  and the full response will re-stream from the top */
+  onStallRetry?: (attempt: number) => void;
 }
 
 export interface CompletionResult {
@@ -286,9 +289,17 @@ export class LlmClient {
         if (!stalled) throw err;
         const stalledEmpty = (err as StallError).emittedOutput === false;
         if (stalledEmpty && attempt === 1) continue; // silent retry, UI saw nothing
+        // a mid-stream stall used to kill the whole turn; re-request instead —
+        // tools only run on complete responses, so a full re-stream is safe
+        // (the UI just sees the answer restart). vLLM wedged for good still
+        // errors after the retry budget.
+        if (attempt < 3) {
+          callbacks.onStallRetry?.(attempt);
+          continue;
+        }
         throw new Error(
           `model stream stalled — no data from ${s.baseURL} for ${stallMs / 1000}s` +
-            (stalledEmpty ? " (no output received)" : " (mid-response)"),
+            (stalledEmpty ? " (no output received)" : ` (mid-response, ${attempt} attempts)`),
         );
       } finally {
         clearTimeout(timer);
