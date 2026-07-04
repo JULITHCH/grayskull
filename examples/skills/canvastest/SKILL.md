@@ -106,6 +106,21 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
      return issues.length ? issues : "maze structure OK";
    }
    ```
+   These thresholds are HARD gates, not suggestions: a failing number means the map
+   data is wrong — fix the data and re-run the check until it passes. Do NOT explain a
+   failing count away ("that's normal for this game") and do NOT weaken the check;
+   verification you reinterpret after the fact is verification you don't have.
+   Get symmetry and corridor width right BY CONSTRUCTION, not by inspection: author
+   only the LEFT half of each row and mirror it programmatically —
+   ```js
+   const HALF = [
+     "WWWWWWWWWWWWWW",   // 14 cols; W wall, . pellet, o power, ' ' empty, - door
+     "W......W......",
+     // ... one string per row, left half only
+   ];
+   const MAZE = HALF.map(h => h + [...h].reverse().join(""));  // 28 cols, symmetric by construction
+   ```
+   then spot-fix the middle seam (tunnel rows, ghost-house door) and re-run the checks.
    Fix the MAP DATA until this passes — hand-author the layout row by row if generation
    fights you; a known-good hardcoded classic layout beats a broken generator. Entity
    visibility belongs here too: after starting the game, assert the player and every
