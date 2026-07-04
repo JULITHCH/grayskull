@@ -65,7 +65,10 @@ export class VisualVerifyGate {
       "3. Verify the actual complaint programmatically with mcp__playwright__browser_evaluate. If the app state " +
       "is not reachable from the console, first add a small debug hook in the code (e.g. " +
       "window.__game = { player, ghosts, map, tileSize }) — then assert the real invariant, e.g. every entity's " +
-      "tile is walkable (not a wall) and each sprite's bounding box fits inside its tile.\n" +
+      "tile is walkable (not a wall) and each sprite's bounding box fits inside its tile. The hook must expose " +
+      "the LIVE objects (not a snapshot-returning function) plus tiny test seams you can call from " +
+      "browser_evaluate — e.g. __game.forceWin() eats all but one collectible, __game.forceDeath() teleports an " +
+      "enemy onto the player — otherwise the end states below stay untestable and unverified.\n" +
       "4. For a GAME or interactive app, verifying one movement is NOT enough — exercise the core loop end to end, " +
       "using mcp__playwright__browser_press_key (REAL key events; a synthetic dispatchEvent can pass while real " +
       "keyboard input is broken). Sample the debug hook before/after and assert the deltas that define 'playable': " +
