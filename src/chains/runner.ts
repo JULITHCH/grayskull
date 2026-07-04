@@ -200,7 +200,19 @@ export async function runChain(opts: {
         }
         const { verdict, reason } = parseVerdict(result);
         if (verdict === "missing") {
-          ui.pushItem({ type: "note", text: "⛓ gate gave no VERDICT — treating as PASS" });
+          // a gate that never rendered a verdict (capped mid-work, wandered off)
+          // has NOT verified anything — treating it as PASS waves unverified work
+          // through the one checkpoint that exists to stop it. Retry the GATE
+          // itself (the implementation isn't known-bad, the verification is).
+          const attempts = (retries.get(i) ?? 0) + 1;
+          retries.set(i, attempts);
+          if (attempts > MAX_GATE_RETRIES) {
+            ui.pushItem({ type: "note", text: `⛓ gate gave no VERDICT after ${MAX_GATE_RETRIES} retries — continuing UNVERIFIED` });
+          } else {
+            ui.pushItem({ type: "note", text: "⛓ gate gave no VERDICT — verification incomplete, re-running the gate" });
+            failReason = "your previous verification run ended without a VERDICT line. Re-run ONLY the asserts, report each measured number, and end with VERDICT PASS or VERDICT FAIL";
+            continue; // same i — re-run the gate step
+          }
         }
         if (verdict === "fail") {
           // jump back to the nearest previous non-gate step
