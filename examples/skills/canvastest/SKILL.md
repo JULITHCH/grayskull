@@ -239,6 +239,17 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    elsewhere in the file — every duplicated direction table WILL drift into a
    different ordering, and the result is inverted controls, turns firing mid-corridor,
    and a "no reverse" rule that blocks the wrong direction (ghosts wiggling in place).
+   Two implementation rules that repeatedly get botched:
+   - BUFFERED TURN NEVER STOPS THE PLAYER: a perpendicular keypress only writes
+     nextDir. The player KEEPS MOVING in the current direction; at each tile center,
+     if nextDir is legal there, swap it in — otherwise keep going and keep the buffer.
+     Do not set the current direction to 'none'/null on input, do not halt to wait
+     for the turn. ('none' is only valid before the very first input of a life.)
+   - ENEMIES DECIDE ONLY ON TILE ENTRY: compute a ghost's next direction exactly once
+     per tile (at the tile center / when a new tile is entered), store it, and follow
+     it until the next center. A ghost that re-decides every frame oscillates around
+     the center point and wiggles in place. Track lastDecisionTile per ghost and skip
+     the AI when the tile hasn't changed.
    Then verify feel with REAL input against the hook, one assertion per rule:
    - key→sign: press each arrow for 300ms; assert ArrowLeft strictly decreases x,
      ArrowRight increases x, ArrowUp decreases y, ArrowDown increases y.
