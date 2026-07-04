@@ -161,6 +161,7 @@ export async function runChain(opts: {
 
       let result: string;
       try {
+        agent.chainStepActive = true; // iteration cap ends the step → gate runs
         if (mode === "shared") {
           result = await agent.runTurn(directive);
         } else {
@@ -168,6 +169,7 @@ export async function runChain(opts: {
           ui.pushItem({ type: "note", text: `⛓ step ${i + 1} report captured (${result.length} chars)` });
         }
       } finally {
+        agent.chainStepActive = false;
         agent.setInferenceProfile(null); // revert to session sampling between steps
         agent.setStepSkills([], []); // clear per-step skill overrides
         agent.setStepMcp(undefined, []); // clear per-step MCP gate

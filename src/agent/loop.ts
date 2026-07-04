@@ -357,6 +357,12 @@ export class GrayskullAgent {
    *  prompt (session toggle, like thinking). */
   legendary = false;
 
+  /** Set by the chain runner around each step: the iteration cap must END the
+   *  step (yielding to the chain's gate) instead of the kamikazeee
+   *  warn-and-continue behavior — an implement step that never yields starves
+   *  the verify gate that was supposed to police it. */
+  chainStepActive = false;
+
   /** Tool-call leak dialect for this model family. */
   get leakDialect(): LeakDialect {
     return modelProfile(this.settings.modelFamily).leakDialect;
@@ -769,7 +775,7 @@ export class GrayskullAgent {
       registry: this.registry,
       schemas: this.registry.schemas(this.toolFilter()),
       maxTurns: this.settings.maxLoopTurns,
-      unattended: () => this.perms.mode === "kamikazeee",
+      unattended: () => this.perms.mode === "kamikazeee" && !this.chainStepActive,
       leakDialect: this.leakDialect,
       maybeCompact: (m) => this.compactInLoop(m),
       drainInjections: () => {
