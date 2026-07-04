@@ -69,6 +69,49 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
 8. **Report**: console errors, each assertion's numbers, screenshot paths, verdict.
    If assertions fail, the bug is NOT fixed — keep working, do not report success.
 
+9. **Generated maps/mazes — assert STRUCTURE, not looks.** You cannot see the screenshot;
+   a maze can render error-free and still be wrong (open fields instead of corridors,
+   unreachable pellets, leaky borders). If the app builds a tile map, verify it with a
+   bash script or `browser_evaluate` BEFORE wiring gameplay to it:
+   ```js
+   () => {
+     const g = window.__game, m = g.map.tiles ?? g.map, issues = [];
+     const rows = m.length, cols = m[0].length;
+     const walk = (r, c) => m[r]?.[c] !== undefined && m[r][c] !== 1;   // adapt wall id
+     // a) border closed except intended tunnels (count the gaps, don't assume)
+     let gaps = 0;
+     for (let r = 0; r < rows; r++) { if (walk(r, 0)) gaps++; if (walk(r, cols - 1)) gaps++; }
+     for (let c = 0; c < cols; c++) { if (walk(0, c)) gaps++; if (walk(rows - 1, c)) gaps++; }
+     if (gaps > 2) issues.push(`border has ${gaps} openings — expected only the tunnel pair`);
+     // b) corridors, not rooms: classic arcade mazes are 1 tile wide — a 2x2 fully
+     //    walkable block (outside the ghost-house area) means open fields, wrong shape
+     let blocks = 0;
+     for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++)
+       if (walk(r, c) && walk(r, c + 1) && walk(r + 1, c) && walk(r + 1, c + 1)) blocks++;
+     if (blocks > 4) issues.push(`${blocks} 2x2 open blocks — corridors are not 1 tile wide`);
+     // c) left-right symmetry (classic pacman mazes mirror horizontally)
+     let asym = 0;
+     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+       if (walk(r, c) !== walk(r, cols - 1 - c)) asym++;
+     if (asym > 0) issues.push(`${asym} tiles break left-right symmetry`);
+     // d) every collectible reachable from spawn (BFS)
+     const seen = new Set(); const q = [[g.spawnRow ?? 17, g.spawnCol ?? 14]];
+     while (q.length) { const [r, c] = q.pop(), k = r + "," + c;
+       if (seen.has(k) || !walk(r, c)) continue; seen.add(k);
+       q.push([r+1,c],[r-1,c],[r,c+1],[r,c-1]); }
+     let stranded = 0;
+     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+       if (m[r][c] === 2 /* pellet id — adapt */ && !seen.has(r + "," + c)) stranded++;
+     if (stranded) issues.push(`${stranded} pellets unreachable from spawn`);
+     return issues.length ? issues : "maze structure OK";
+   }
+   ```
+   Fix the MAP DATA until this passes — hand-author the layout row by row if generation
+   fights you; a known-good hardcoded classic layout beats a broken generator. Entity
+   visibility belongs here too: after starting the game, assert the player and every
+   enemy is inside the playfield bounds and actually drawn (position within canvas,
+   not NaN, not stuck at an off-screen HUD coordinate).
+
 Common root causes to check when "X is drawn on/over Y" in tile games:
 - sprite radius/bbox larger than the tile (e.g. radius 20 in a 32px cell → guaranteed overlap)
 - spawn/position constants landing on wall tiles (verify against the map array!)
