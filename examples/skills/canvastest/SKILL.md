@@ -13,6 +13,21 @@ mcp__playwright__ tools. The DOM is a single <canvas> — accessibility snapshot
 layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric assertions,
 (c) screenshots for the human. Never claim a visual fix without steps 3–6.
 
+0. **Research authentic mechanics FIRST (known games).** If you are reimplementing a
+   well-known game (Pac-Man, Tetris, Snake, Breakout, ...), your recalled knowledge of
+   its mechanics is INCOMPLETE and partly wrong — do not design from memory. Before
+   writing movement/AI code: mcp__searxng__searxng_web_search for the authoritative
+   mechanics reference (e.g. "Pac-Man Dossier ghost AI cornering buffered input"), then
+   mcp__searxng__web_url_read the best 1-2 hits and extract the CONCRETE rules into a
+   short list you implement against. For Pac-Man that list includes at least: the
+   player's next direction is BUFFERED and applied at the next tile center where the
+   turn is legal (pressing a key mid-corridor must not turn immediately or get lost);
+   the player may reverse 180° at any time; ghosts choose their direction ONE TILE
+   AHEAD at intersections, by minimizing straight-line distance to a per-ghost target
+   tile; ghosts NEVER reverse except on scatter/chase mode switches; frightened ghosts
+   pick randomly at intersections; each ghost has a distinct target rule (chase pac /
+   4 ahead / mirror via red ghost / distance-based) and a fixed scatter corner.
+
 1. **Run it**: start the dev server via bash, backgrounded (`./run.sh &` or
    `npx vite --host 0.0.0.0 &`); parse the port from its output. `browser_navigate` to it.
 
@@ -209,10 +224,39 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    enemy is inside the playfield bounds and actually drawn (position within canvas,
    not NaN, not stuck at an off-screen HUD coordinate).
 
+10. **Movement feel — one direction table, then prove each rule with real keys.**
+   Define the direction encoding EXACTLY ONCE and derive everything from it:
+   ```js
+   const DIRS = {
+     up:    { dx: 0, dy: -1, opposite: "down"  },
+     down:  { dx: 0, dy:  1, opposite: "up"    },
+     left:  { dx: -1, dy: 0, opposite: "right" },
+     right: { dx:  1, dy: 0, opposite: "left"  },
+   };
+   const KEY_TO_DIR = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+   ```
+   NEVER write a second parallel array like `[[1,0],[0,-1],...]` or `(dir+2)%4`
+   elsewhere in the file — every duplicated direction table WILL drift into a
+   different ordering, and the result is inverted controls, turns firing mid-corridor,
+   and a "no reverse" rule that blocks the wrong direction (ghosts wiggling in place).
+   Then verify feel with REAL input against the hook, one assertion per rule:
+   - key→sign: press each arrow for 300ms; assert ArrowLeft strictly decreases x,
+     ArrowRight increases x, ArrowUp decreases y, ArrowDown increases y.
+   - buffered turn: while moving along a corridor whose side is walled, press the
+     perpendicular key; assert direction is UNCHANGED now, then assert the turn
+     executes at the next intersection (poll position+dir until the tile changes).
+   - instant reversal (player only): press the opposite arrow mid-corridor; assert
+     direction flips immediately.
+   - ghost no-reverse + no-wiggle: sample every ghost's dir and position ~20×/3s;
+     assert zero 180° flips outside mode switches, and net displacement ≥ 3 tiles
+     per ghost per 3s window. A ghost oscillating on one tile is a broken opposite()
+     or a decision taken every frame instead of at tile centers.
+
 Common root causes to check when "X is drawn on/over Y" in tile games:
 - sprite radius/bbox larger than the tile (e.g. radius 20 in a 32px cell → guaranteed overlap)
 - spawn/position constants landing on wall tiles (verify against the map array!)
 - collision testing only the CENTER point while the sprite is bbox-sized
 - two coordinate conventions mixed: tile-origin (col*T) vs tile-center (col*T + T/2)
 - duplicate hardcoded dimensions drifting apart (map rows vs hardcoded height)
+- duplicated direction/keymap tables drifting into different orderings (see step 10)
 - draw order (addChild order / missing layers) — check last, it's rarer than geometry

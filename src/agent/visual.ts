@@ -100,7 +100,11 @@ export class VisualVerifyGate {
         "synthetic dispatchEvent can pass while real keyboard input is broken) and assert the deltas that make it " +
         "playable: score increases through collectibles, every enemy leaves its spawn area within ~10s (poll twice), " +
         "the lose path (collision → life lost → game over) and the win path (last collectible → win state) both " +
-        "fire — use the seams to reach them. Screenshot mid-gameplay, not just the start screen."
+        "fire — use the seams to reach them. Screenshot mid-gameplay, not just the start screen.\n" +
+        "If this reimplements a WELL-KNOWN game, research its authentic mechanics online FIRST " +
+        "(mcp__searxng__searxng_web_search + web_url_read an authoritative reference) — your recalled version of " +
+        "input buffering, enemy AI, and turning rules is incomplete and partly wrong; implement from the fetched " +
+        "rules, not from memory."
       : "";
     return base + game;
   }
