@@ -138,6 +138,10 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
      return issues.length ? issues : "maze structure OK";
    }
    ```
+   HUD placement is part of structure: reserve a band OUTSIDE the playfield for
+   score/lives/level (canvas taller than the maze, or a separate DOM bar) and assert
+   it — no HUD text rendered inside the maze's tile bounds, or roaming entities will
+   overlap the score.
    These thresholds are HARD gates, not suggestions: a failing number means the map
    data is wrong — fix the data and re-run the check until it passes. Do NOT explain a
    failing count away ("that's normal for this game") and do NOT weaken the check;
