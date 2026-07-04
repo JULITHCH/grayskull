@@ -65,6 +65,13 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
 
 7. **Exercise**: send real keys (`browser_press_key` ArrowLeft/Space), re-run the step-4
    assertions after movement — position bugs often only appear after input.
+   Then test every input affordance the UI ADVERTISES, exactly as advertised: if any
+   screen says "PRESS START" / "PRESS SPACE" / "ENTER TO RESTART", press those literal
+   keys with browser_press_key and assert the state transition happened; if there is a
+   button, click it too. Each promise needs its own working handler — a start screen
+   that blinks PRESS START but only reacts to a mouse click is a bug, and so is the
+   reverse. Walk the full screen flow this way: start → playing → game over → restart,
+   and start → playing → win → next level/restart.
 
 8. **Report**: console errors, each assertion's numbers, screenshot paths, verdict.
    If assertions fail, the bug is NOT fixed — keep working, do not report success.
