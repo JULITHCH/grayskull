@@ -84,6 +84,15 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    that blinks PRESS START but only reacts to a mouse click is a bug, and so is the
    reverse. Walk the full screen flow this way: start → playing → game over → restart,
    and start → playing → win → next level/restart.
+   VERIFICATION HYGIENE — one flow, one fresh load: `browser_navigate` to reload the
+   page before EACH end-to-end flow check, then reach the target state only through
+   real input plus the test seams. Never verify a transition on a session you already
+   mutated by hand (manual init calls, forced states from earlier experiments) —
+   stale hand-mutations make working handlers look broken, and you will burn the rest
+   of the session debugging a bug that does not exist. If a handler seems dead:
+   reload, reproduce with real input only, and only then read code. Budget your
+   debugging: if two hypotheses in a row failed, reload and re-reproduce before
+   forming a third.
 
 8. **Report**: console errors, each assertion's numbers, screenshot paths, verdict.
    If assertions fail, the bug is NOT fixed — keep working, do not report success.
