@@ -268,6 +268,54 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    swipe, gamepad), keyboard comes FIRST and every path must feed the same buffered
    nextDir; test the keyboard path on its own — a working swipe handler can mask a
    keyboard that is wired to nothing.
+   DO NOT hand-pick asserts one by one — save this runner as `feeltest.mjs` next to
+   the game and run it with `node feeltest.mjs` (`npm i playwright` first if needed;
+   it uses the installed system Chrome). It runs the WHOLE battery and prints one
+   measured PASS/FAIL line per assert — paste its full output into your report; any
+   FAIL line means the gate verdict is FAIL. It expects the window.__game hook with
+   live `pacman` (px/py or x/y, dir, nextDir), `ghosts` (array or object of the
+   four), `score`, and a start on Enter — adapt the few marked accessors if your
+   hook differs, nothing else:
+   ```js
+   import { chromium } from "playwright";
+   const url = "file://" + process.cwd() + "/index.html";
+   const b = await chromium.launch({ channel: "chrome", headless: true });
+   const p = await b.newPage({ viewport: { width: 900, height: 900 } });
+   const errs = [];
+   p.on("pageerror", e => errs.push(e.message));
+   await p.goto(url); await p.waitForTimeout(1200);
+   const S = () => p.evaluate(() => {
+     const g = window.__game ?? window.__pacman;              // ADAPT if renamed
+     const P = g.pacman ?? g.pac;                             // ADAPT
+     const gh = Array.isArray(g.ghosts) ? g.ghosts : Object.values(g.ghosts ?? {});
+     return { sc: g.score, x: P.px ?? P.x, y: P.py ?? P.y, dir: P.dir, nd: P.nextDir,
+              gh: gh.map(h => ({ x: h.px ?? h.x, y: h.py ?? h.y, d: h.dir })) };
+   });
+   const out = (name, ok, val) => console.log(`${ok ? "PASS" : "FAIL"} ${name}: ${val}`);
+   await p.keyboard.press("Enter"); await p.keyboard.press("Space"); await p.waitForTimeout(500);
+   // key -> sign (each arrow, fresh 700ms hold)
+   for (const [key, axis, sign] of [["ArrowLeft","x",-1],["ArrowRight","x",1],["ArrowUp","y",-1],["ArrowDown","y",1]]) {
+     const a = await S(); await p.keyboard.down(key); await p.waitForTimeout(700); await p.keyboard.up(key);
+     const d = (await S())[axis] - a[axis];
+     out(`key ${key}`, Math.sign(d) === sign || Math.abs(d) > 0, `d${axis}=${Math.round(d)} (0 = key dead or wall; retest from an open tile if unsure)`);
+   }
+   // score increases while moving
+   { const a = await S(); await p.keyboard.down("ArrowRight"); await p.waitForTimeout(1500); await p.keyboard.up("ArrowRight");
+     const bq = await S(); out("score increases", bq.sc > a.sc, `${a.sc} -> ${bq.sc}`); }
+   // buffered turn: press perpendicular mid-corridor, dir must NOT change now, player must keep moving
+   { const a = await S(); await p.keyboard.press(a.dir === "up" || a.dir === "down" ? "ArrowLeft" : "ArrowUp");
+     await p.waitForTimeout(120); const m = await S(); await p.waitForTimeout(1000); const z = await S();
+     out("buffer stored", m.nd !== m.dir || z.dir !== a.dir, `dir=${m.dir} nd=${m.nd}`);
+     out("no stop-and-wait", Math.abs(z.x - m.x) + Math.abs(z.y - m.y) > 0, `moved ${Math.round(Math.abs(z.x-m.x)+Math.abs(z.y-m.y))}`); }
+   // ghosts: all leave spawn and keep moving, no in-place wiggle
+   { const s0 = (await S()).gh; await p.waitForTimeout(8000); const s1 = (await S()).gh;
+     s1.forEach((h, i) => out(`ghost ${i} moves`, Math.hypot(h.x - s0[i].x, h.y - s0[i].y) > 24, `net=${Math.round(Math.hypot(h.x - s0[i].x, h.y - s0[i].y))}px/8s`)); }
+   out("zero console errors", errs.length === 0, errs.slice(0, 3).join(" | ") || "none");
+   await p.screenshot({ path: ".grayskull/screenshots/feeltest.png" });
+   await b.close();
+   ```
+   The seams-based end states (forceWin -> win screen, forceDeath x lives -> game
+   over -> restart) still need the step-7 screen-flow walk on a FRESH page load.
 
 Common root causes to check when "X is drawn on/over Y" in tile games:
 - sprite radius/bbox larger than the tile (e.g. radius 20 in a 32px cell → guaranteed overlap)
