@@ -71,8 +71,12 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
 
 9. **Generated maps/mazes — assert STRUCTURE, not looks.** You cannot see the screenshot;
    a maze can render error-free and still be wrong (open fields instead of corridors,
-   unreachable pellets, leaky borders). If the app builds a tile map, verify it with a
-   bash script or `browser_evaluate` BEFORE wiring gameplay to it:
+   unreachable pellets, leaky borders). MAP-FIRST WORKFLOW: author the tile data and
+   validate it with a THROWAWAY BASH SCRIPT (node/bun on the array literal — seconds per
+   iteration, no browser) until every check below passes, and only THEN write gameplay
+   code against the validated data. Debugging map defects through the running game
+   (browser_evaluate archaeology on ghost coordinates) burns tens of minutes per bug —
+   the same defect is one line of validator output. Checks, runnable in either world:
    ```js
    () => {
      const g = window.__game, m = g.map.tiles ?? g.map, issues = [];
@@ -122,7 +126,46 @@ layout checks see NOTHING. Your eyes are (a) the app's own state, (b) numeric as
    ```
    then spot-fix the middle seam (tunnel rows, ghost-house door) and re-run the checks.
    Fix the MAP DATA until this passes — hand-author the layout row by row if generation
-   fights you; a known-good hardcoded classic layout beats a broken generator. Entity
+   fights you; a known-good hardcoded classic layout beats a broken generator.
+   For a PACMAN-STYLE game, do not author the maze from scratch: start from this
+   reference layout (28×30; W wall, `.` pellet, `o` power pellet, `-` ghost-house door,
+   space = walkable empty; row 14 is the wrap tunnel; validated: symmetric, no dead
+   ends, no open fields, all 238 pellets + 4 power pellets reachable):
+   ```
+   WWWWWWWWWWWWWWWWWWWWWWWWWWWW
+   W............WW............W
+   W.WWWW.WWWWW.WW.WWWWW.WWWW.W
+   WoWWWW.WWWWW.WW.WWWWW.WWWWoW
+   W.WWWW.WWWWW.WW.WWWWW.WWWW.W
+   W............WW............W
+   W.WWWW.WW.WWWWWWWW.WW.WWWW.W
+   W.WWWW.WW.WWWWWWWW.WW.WWWW.W
+   W......WW..........WW......W
+   WWWWWW.WW WWWWWWWW WW.WWWWWW
+   WWWWWW.WW WWWWWWWW WW.WWWWWW
+   WWWWWW.WW          WW.WWWWWW
+   WWWWWW.WW WWW--WWW WW.WWWWWW
+   WWWWWW.WW W      W WW.WWWWWW
+         .   W      W   .      
+   WWWWWW.WW WWWWWWWW WW.WWWWWW
+   WWWWWW.WW          WW.WWWWWW
+   WWWWWW.WW WWWWWWWW WW.WWWWWW
+   WWWWWW.WW WWWWWWWW WW.WWWWWW
+   W............WW............W
+   W.WWWW.WWWWW.WW.WWWWW.WWWW.W
+   W.WWWW.WWWWW.WW.WWWWW.WWWW.W
+   Wo..WW................WW..oW
+   WWW.WW.WW.WWWWWWWW.WW.WW.WWW
+   WWW.WW.WW.WWWWWWWW.WW.WW.WWW
+   W......WW....WW....WW......W
+   W.WWWWWWWWWW.WW.WWWWWWWWWW.W
+   W.WWWWWWWWWW.WW.WWWWWWWWWW.W
+   W............WW............W
+   WWWWWWWWWWWWWWWWWWWWWWWWWWWW
+   ```
+   Ghost house interior is rows 13–14, cols 11–16; door on row 12; spawn Pac-Man near
+   row 22 center. Copy it VERBATIM (28 chars per row — run the validator to prove you
+   did), then adapt tile ids to your engine. Entity
    visibility belongs here too: after starting the game, assert the player and every
    enemy is inside the playfield bounds and actually drawn (position within canvas,
    not NaN, not stuck at an off-screen HUD coordinate).
