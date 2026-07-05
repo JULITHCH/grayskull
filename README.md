@@ -10,16 +10,20 @@ slow one, grind out code on the fast one, gate the review on whichever you trust
 
 Ships with presets for a DGX Spark stack (Qwen3.6-35B, Qwen3.5-122B-heretic,
 GLM-4.5-Air, small Llama/Nemotron utility models) — keep them, edit them, or point
-your own; nothing is hardwired. Model-family profiles (qwen / glm) absorb the dialect
-quirks per model: tool-call leak formats, thinking-mode kwargs, chain sampling presets.
+your own; nothing is hardwired. Model-family profiles absorb the dialect quirks per
+model (tool-call leak formats, thinking-mode kwargs, chain sampling presets) — and
+families are **data, not code**: add or override them in the settings GUI or with
+`/families`, and seed new presets straight from the open **models.dev** database
+(`/model import qwen3 coder` — context/output limits filled in for you).
 
 Local models are not frontier-smart, so the harness does extra lifting: persistent
 two-tier memory with brain-like scoring, ask-back interviews, tool-call repair,
 mandatory web verification, stuck-detection with auto web-research, plan-first
-blueprint gating, sub-agent fan-out, user-composable thinking chains, image input
-(pasted *and* from tool results — the agent sees its own Playwright screenshots),
-scheduled unattended workers, a per-session shell in the web UI, a matrix-style web
-UI with zen mode, and aggressive context hygiene.
+blueprint gating, per-turn checkpoints with `/rewind`, lifecycle hooks, sub-agent
+fan-out, user-composable thinking chains, image input (pasted *and* from tool
+results — the agent sees its own Playwright screenshots), scheduled unattended
+workers, a per-session shell in the web UI, a login-gated matrix-style web UI with
+zen mode, headless one-shot mode, and aggressive context hygiene.
 
 ![The control room — live sessions, agent mesh, memory activation graph, workers](docs/img/control-room.png)
 
@@ -73,6 +77,14 @@ with zero cloud dependency:
   audio on. Your agent as an aquarium.
 - **KAMIKAZEEE mode.** Fully unattended: never stops at iteration caps, auto-answers
   its own questions. Shift+tab, red-alert theme, matrix rain. You were warned.
+- **An undo button for a weak model.** Every turn's file edits are snapshotted before
+  they land — `/rewind` restores the files as they were before that turn. KAMIKAZEEE
+  insurance.
+- **Your hooks in the loop.** Claude Code-style lifecycle hooks (PreToolUse /
+  PostToolUse / Stop / UserPromptSubmit): your shell commands can block tool calls,
+  annotate results, or refuse a turn from ending.
+- **Scriptable.** `grayskull -p "prompt"` runs headless — answer on stdout, progress
+  on stderr — for pipes, cron and CI.
 
 One TypeScript codebase, one Bun binary, no cloud, no telemetry, no subscription.
 
@@ -101,6 +113,17 @@ bun run src/index.tsx      # or manually (bun lives in ~/.bun/bin)
 It auto-joins a running grayskull-web hub, so browser and terminal mirror each other.
 Build standalone binaries (no bun at runtime): `bun run build` → `dist/grayskull`,
 `bun run build:web` → `dist/grayskull-web`.
+
+Headless one-shot (scripts, pipes, cron, CI):
+
+```sh
+grayskull -p "summarize what changed in the last 3 commits"
+echo "explain this error: …" | grayskull -p
+grayskull -p "fix the failing test" --mode kamikazeee   # permission asks are DENIED by default
+grayskull --add-dir ../shared-lib                        # extra working dirs (also: addDirs in settings)
+```
+
+Final answer on stdout, tool/progress lines on stderr, exit 1 on error.
 
 First useful thing to type: `/init` — it explores the project, asks you 2-3 questions,
 and seeds the project memory.
@@ -203,9 +226,11 @@ Answering `a` (always) at a prompt allowlists that tool for the session.
 
 ## Built-in tools (what the model can do)
 
-`bash` (full GNU userland, git, fzf), `read`, `write`, `edit` (exact-string replace,
-diff previews), `grep`, `glob`, `ask_user`, `todo`, `skill`, `create_agent`,
-`spawn_agent`, plus everything MCP servers provide.
+`bash` (full GNU userland, git, fzf — `background=true` runs dev servers/watchers
+detached), `bash_output` (read a background job's new output, `kill` to stop it),
+`read`, `write`, `edit` (exact-string replace, diff previews), `grep`, `glob`,
+`ask_user`, `todo`, `skill`, `create_agent`, `spawn_agent`, plus everything MCP
+servers provide.
 
 Weak-model armor: every tool call is schema-validated; invalid calls get an actionable
 error fed back (max 3 repair attempts), and tool calls the model emits as plain text
@@ -262,50 +287,51 @@ compaction — that's what makes compaction safe.
 Precedence: built-in defaults < `~/.config/grayskull/settings.json` <
 `./.grayskull/settings.json`. Edit with `/settings` (global) or `/settings local`.
 
-Covers: `baseURL`, `model`, `modelFamily`, `models` (named `/model` presets),
-`contextWindow` (262144 on the qwen3.6 default), `maxTokens`, sampling (`temperature`,
-`topP`, `topK`, `minP`, `presencePenalty`, `repetitionPenalty`), `enableThinking`,
-`compactThreshold`, `defaultMode`, `editor`, `agentConcurrency`, `memory` (enabled /
-maxTokens / globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow/deny),
-`mcpServers`.
+Covers: `baseURL`, `model`, `modelFamily`, `families` (custom model families as data),
+`models` (named `/model` presets), `contextWindow` (262144 on the qwen3.6 default),
+`maxTokens`, sampling (`temperature`, `topP`, `topK`, `minP`, `presencePenalty`,
+`repetitionPenalty`), `enableThinking`, `compactThreshold`, `compactStrategy`,
+`defaultMode`, `editor`, `agentConcurrency`, `memory` (enabled / maxTokens /
+globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow/deny),
+`mcpServers`, `hooks` (lifecycle shell hooks), `checkpoints` (/rewind snapshots),
+`addDirs`, `web` (login).
 
 **System prompt**: `/system` opens the global one (`~/.config/grayskull/system-prompt.md`)
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
 (set `"replaceSystemPrompt": true` in local settings to replace instead).
 
-## /setup — endpoints, LLM presets & service health
+## Settings GUI — the ⚙ cog / /setup
 
-`/setup` opens a setup dialog instead of hand-editing JSON — keyboard-driven in the
-terminal (↑↓ select, enter edit, esc close), a modal in the web UI (same data, same
-live behavior):
+Everything is configurable visually — no hand-editing JSON. In the web UI the **⚙ cog
+top right** opens a tabbed settings dialog; in the terminal `/setup` opens the same
+data as a keyboard dialog (↑↓ select, enter edit, `a` add, `x` remove, `s` save):
 
-- **Full LLM configs, grouped** — the ACTIVE MODEL section and one section per
-  `/model` preset, each with the complete stack: **family** (qwen3.5/glm4.5 —
-  selects the tool-call format and thinking presets), **endpoint**, **model id**,
-  **api key env** (shows whether the env var is actually set), context window,
-  max output tokens, temperature/top_p/top_k, thinking on/off. Field types are
-  real: enums cycle (dropdowns in the web), toggles flip, numbers validate.
-- **Applied live** — committing an ACTIVE MODEL field takes effect immediately
-  (endpoint/key changes reconnect the client, the searxng URL restarts its MCP
-  bridge) — no restart. `s` (or SAVE in the web) persists the edited fields into
-  the global `settings.json` (only what you changed is written).
-- **Add / remove LLMs** — `a` adds one (cloned from the active stack, then adjust
-  family/endpoint/model id per field), `x` removes the selected one; in the web
-  modal use + ADD LLM and ✕ REMOVE per section. Grayskull's seeded defaults
-  (qwen35, glm, …) are removable too: saving writes the whole preset list to
-  `settings.json`, which then owns it — deleted defaults stay gone across restarts.
-- **Extendable** — the fields of an LLM are one spec table in `src/setup/core.ts`
-  (`PRESET_SPEC`/`ACTIVE_SPEC`); adding an entry there surfaces it in the TUI
+- **ACTIVE MODEL** — the live stack: family, endpoint, model id, api key env (shows
+  whether the env var is actually set), context window, max tokens, sampling,
+  thinking. Edits apply to the session immediately (endpoint/key changes reconnect
+  the client) — SAVE persists only what you changed into the global `settings.json`.
+- **LLM PRESETS** — one card per `/model` preset, + ADD LLM (cloned from the active
+  stack), ✕ REMOVE (seeded defaults stay gone once saved). Below: **import from
+  models.dev** — search the open model database in place, one click imports a preset
+  with real context/output limits; your endpoint stays as configured.
+- **FAMILIES** — model families as editable data: tool-call leak dialect (qwen JSON /
+  glm XML), vLLM parser flags, and the codegen/reason chain sampling presets.
+  + ADD FAMILY clones the active one; a custom family named like a built-in
+  overrides it. New families need zero code.
+- **BEHAVIOR** — the harness knobs: default permission mode, compaction strategy +
+  threshold, max tool iterations, stream stall timeout, sub-agent concurrency,
+  memory + scoring, plan-first / visual-verify / diagnostics / stuck-research gates,
+  checkpoints. Every edit is zod-validated — the GUI cannot write a settings.json
+  that fails to load.
+- **SERVICES** — live health for **searxng**, **context7**, **lsp-ts** and
+  **playwright**: MCP bridge state, tool counts, and real checks behind them (the
+  searxng *instance* probed over HTTP, lsp binaries looked up on disk, playwright
+  config verified) with concrete fix instructions inline; ↻ RECHECK reconnects
+  failed servers. Plus **WEB LOGIN**: set the interface password right here
+  (write-only field, argon2id-hashed on the spot, armed on SAVE — no restart).
+- **Extendable** — every tab is a spec table in `src/setup/core.ts` (`PRESET_SPEC` /
+  `ACTIVE_SPEC` / `FAMILY_SPEC` / `CONF_SPEC`); one added entry surfaces in the TUI
   dialog, the web modal and persistence automatically.
-- **Service health** — live status for **searxng**, **context7**, **lsp-ts** and
-  **playwright**: MCP bridge state, tool counts, and real checks behind them — the
-  searxng *instance* is probed over HTTP (the bridge connects happily while the
-  instance is down), the lsp binaries (`mcp-language-server`,
-  `typescript-language-server`) are looked up on disk/PATH, playwright's config
-  presence is verified. Anything missing or failed shows concrete fix instructions
-  inline (the `docker run` for searxng, the `go install`/`npm i -g` lines for LSP,
-  the settings snippet for playwright). `r` reconnects failed servers and re-runs
-  all checks.
 
 ## Web search + fetch (always on)
 
@@ -496,12 +522,12 @@ model can't impose on itself:
   first run: `full-dev` (the pipeline above) and `quick` (`plan -> implement -> test`).
 - Statusline shows `⛓ name 3/7` during a run, `⛓ name [shared]` while sticky.
 
-## Model profiles & /model — Qwen / GLM-4.5-Air
+## Model families & /model — data-driven profiles
 
 `modelFamily` in settings selects a model profile that adapts three family-specific
 things: the plaintext tool-call **leak-recovery dialect**, the chain-step **sampling
 presets**, and the recorded vLLM **parser flags**. The thinking toggle
-(`chat_template_kwargs.enable_thinking`) is the same on both families.
+(`chat_template_kwargs.enable_thinking`) is the same on both built-ins.
 
 - `qwen3.5` (default family) — leak dialect `qwen` (JSON `<tool_call>`/```json), parsers
   `qwen3_xml` / `qwen3`. Used by **Qwen3.6-35B-A3B** (the default, `:8000`) and the
@@ -509,18 +535,68 @@ presets**, and the recorded vLLM **parser flags**. The thinking toggle
 - `glm4.5` — leak dialect `glm` (GLM's `<tool_call>name<arg_key>/<arg_value></tool_call>`
   XML), parsers `glm45` / `glm45`.
 
+**Families are data, not code.** `settings.families` adds new ones or overrides a
+built-in — edit them in the ⚙ settings GUI (FAMILIES tab) or via `/families`:
+
+```
+/families                 # list built-ins + custom, dialects, presets
+/families add my-nemotron # clone the active family, tune it in /setup
+/families remove <name>
+```
+
+**Import model metadata from models.dev** — the open model database (150+ providers):
+
+```
+/model import qwen3 coder          # search: lists matches with ctx/output/tool flags
+/model import alibaba-cn/qwen3-coder-plus   # exact: creates a preset with real limits
+```
+
+The endpoint stays your server (models.dev knows models, not your box); the dump is
+cached for a day, so it works offline after the first hit. Same thing visually: ⚙ →
+LLM PRESETS → the models.dev search panel.
+
 **Switch the whole stack live with `/model`** — no restart. Named presets live under
 `models` in settings (seeded with the resident trio `qwen36-nvfp4`, `llama-8b`,
 `nemotron-9b` plus the solo recipes `qwen35`, `glm`); `/model` lists them, `/model
 llama-8b` copies that preset's family, endpoint, model id, context window and sampling
 into the active config and rebuilds the client connection (leak dialect and chain
 presets follow the family, sub-agents included). History is kept across a switch;
-`/clear` to reset. Add and edit presets in `/setup`, or under `models` in settings.
+`/clear` to reset. Add and edit presets in the ⚙ settings GUI, or under `models` in
+settings.
 
 This emulates "two models" from GLM-4.5-Air's hybrid reasoning: codegen steps run
 thinking-OFF, plan/diagnose/test run thinking-ON. See `glm-server-notes.md` for the
-verified GLM values and the server launch flags. Adding a family = one entry in
-`src/llm/profiles.ts`.
+verified GLM values and the server launch flags.
+
+## Checkpoints — /rewind
+
+Before a turn's first file edit, the touched files are snapshotted to
+`.grayskull/checkpoints/` (one checkpoint per turn, pruned to `checkpoints.keep`,
+default 30). `/rewind` lists recent turns with their files; `/rewind N` (or
+`/rewind last`) restores every file to its pre-turn state — files the turn *created*
+are deleted. Only `write`/`edit` tool changes are covered (bash side effects are not);
+kill switch: `"checkpoints": { "enabled": false }`. The undo button KAMIKAZEEE mode
+deserves.
+
+## Hooks — your shell in the loop
+
+Claude Code-convention lifecycle hooks, defined in settings:
+
+```json
+"hooks": [
+  { "event": "PreToolUse", "matcher": "bash", "command": "jq -e '.toolArgs.command | test(\"rm -rf\") | not' >/dev/null || { echo 'no rm -rf' >&2; exit 2; }" },
+  { "event": "PostToolUse", "matcher": "write", "command": "jq -r .toolArgs.path >> /tmp/touched.log" },
+  { "event": "Stop", "command": "./check-todos-done.sh" }
+]
+```
+
+Events: `PreToolUse` (exit 2 **blocks the call**, stderr becomes the message the model
+sees), `PostToolUse` (stdout is appended to the tool result), `Stop` (exit 2 refuses
+the turn end — capped at 2 per turn so a broken hook can't spin the loop),
+`UserPromptSubmit` (block or annotate a prompt). The JSON payload (`event`, `cwd`,
+`toolName`, `toolArgs`, `toolResult`, `prompt`) arrives on stdin; `matcher` globs the
+tool name; absent = all tools. Failing hooks degrade silently — they can never take
+the session down.
 
 ## Legendary mode — /legendarymode
 
@@ -568,6 +644,9 @@ WebSockets, zero frontend build). This is the recommended way to drive GRAYSKULL
 - **⌨ TERM — a real terminal per session** (ctrl+\`): a PTY shell spawned in the
   session's project folder, xterm.js drawer above the prompt. Survives hide/reopen
   (scrollback replays), esc stays in the shell (vim-safe), dies with its session
+- **⚙ settings from the header** — the cog opens the tabbed settings dialog (model /
+  presets / families / behavior / services incl. the login password); all in-page
+  dialogs, no browser popups
 - **slash commands work in web sessions** too (`/tc`, `/memory`, `/compact`, …);
   editor/picker commands stay terminal-only
 - permission and ask_user requests pop as modals (y/a/n keys work)
@@ -600,7 +679,17 @@ permission/ask dialogs and interrupt — while the terminal stays fully usable; 
 mirror each other in real time, and a prompt answered in one closes the dialog in the
 other. Hub URL override: `GRAYSKULL_HUB=ws://host:4242/cli`.
 
-No auth — it binds to 0.0.0.0 for LAN use, don't expose it to the internet.
+**Login for exposed interfaces.** Out of the box there is no password (trusted-LAN
+default, loud startup warning) — before exposing the port, set one: ⚙ settings →
+SERVICES → WEB LOGIN (write-only field, hashed argon2id on the spot, armed on SAVE —
+no restart), or `grayskull-web --set-password '<pw>'`. Everything is gated — page,
+assets, the WebSocket itself; sessions are HMAC-signed HttpOnly cookies (30 days,
+survive server restarts), wrong attempts are rate-limited per IP, `/logout` (also in
+the ⌘K palette) ends a browser's login. The TUI bridge `/cli` stays loopback-only —
+if you reverse-proxy on the same host, don't proxy `/cli`. And the login page is a
+show of its own: a 3D cube hurls in from deep space, GRAYSKULL on its face, then flips
+around — the password form is on its back. Use https or an ssh tunnel when crossing
+untrusted networks; the cookie is all that guards a shell-wielding agent.
 
 ## Workers + scheduler — unattended jobs
 
@@ -654,7 +743,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/help` | commands + keys |
 | `/init` | explore the project, ask questions, seed project memory |
 | `/system [local]` | edit system prompt in `$EDITOR` |
-| `/setup` | dialog (TUI + web): endpoints live, add/remove LLM presets, service health |
+| `/setup` | settings dialog (⚙ cog in the web): model, presets, families, behavior, services |
 | `/settings [local]` | edit settings.json |
 | `/memory [edit [global]]` | show / edit memories |
 | `/remember <fact>` | save to the global vault |
@@ -663,6 +752,9 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/compact` | compact the conversation now |
 | `/mode [name]` | show or set permission mode |
 | `/model [name]` | switch the whole model stack live (qwen35 / qwen36 / glm), no restart |
+| `/model import <query>` | search models.dev, import a preset with real ctx/output limits |
+| `/families [add\|remove <name>]` | model families as data — list, clone, remove |
+| `/rewind [N]` | undo a turn's file edits (pre-edit snapshots) |
 | `/thinking [on\|off]` | toggle the model's reasoning mode live (no restart) |
 | `/legendarymode [on\|off]` | toggle the high-agency persona |
 | `/mcp [reconnect <name>]` | MCP status / reconnect |
@@ -678,10 +770,12 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 
 ```
 ~/.config/grayskull/            global: settings.json, system-prompt.md, legendarymode.md,
-                                GRAYSKULL.md (vault), agents/, chains/, skills/, sessions/
+                                GRAYSKULL.md (vault), web-secret (login cookie key),
+                                models-dev.json (metadata cache), jobs.json, job-logs/,
+                                agents/, chains/, skills/, workers/, sessions/
 <project>/.grayskull/           local: settings.json, system-prompt.md, memory.md,
                                 memory-archive.md, memory-scores.json, prompt-history.txt,
-                                agents/, skills/
+                                checkpoints/ (/rewind), plans/, agents/, skills/
 ```
 
 ## Development
