@@ -3,7 +3,12 @@
 import indexHtmlRaw from "./ui.html" with { type: "text" };
 // `type: "file"` embeds the asset in compiled binaries and resolves to a path
 import zenMp3Path from "./zen.mp3" with { type: "file" };
+// xterm.js frontend assets, embedded so the UI stays CDN-free
+import xtermJsRaw from "../../node_modules/@xterm/xterm/lib/xterm.js" with { type: "text" };
+import xtermCssRaw from "../../node_modules/@xterm/xterm/css/xterm.css" with { type: "text" };
+import xtermFitRaw from "../../node_modules/@xterm/addon-fit/lib/addon-fit.js" with { type: "text" };
 import { SessionManager } from "./session";
+import { TermManager } from "./term";
 import { ensureGlobalSystemPrompt, loadSettings } from "../config/settings";
 import { ensureDirs } from "../config/paths";
 import { ensureStarterChains } from "../chains/registry";
@@ -62,6 +67,12 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   ];
   const broadcastSessions = () => broadcast({ t: "sessions", list: sessionList() });
   manager.onListChange = broadcastSessions;
+
+  // per-session PTY shells (web/term.ts) — output fans out to every browser
+  const terms = new TermManager({
+    onData: (sid, d) => broadcast({ t: "term_out", sid, d }),
+    onExit: (sid, code) => broadcast({ t: "term_exit", sid, code }),
+  });
 
   // interval scheduler: this process is the always-on daemon, so worker jobs
   // live here; the TUI edits the same jobs.json but never runs them
@@ -223,8 +234,28 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       return;
     }
     if (msg["t"] === "delete_session") {
+      terms.kill(String(msg["sid"] ?? ""));
       manager.delete(String(msg["sid"] ?? ""));
       return;
+    }
+    // terminals are server-side for every session origin — handle BEFORE the
+    // CLI forward below, or a CLI session's term_* would go to the TUI instead
+    switch (msg["t"]) {
+      case "term_open": {
+        const cwd = manager.sessions.get(sid)?.cwd ?? cliSessions.get(sid)?.cwd ?? opts.defaultCwd;
+        const replay = terms.open(sid, cwd);
+        ws.send(JSON.stringify({ t: "term_ready", sid, replay }));
+        return;
+      }
+      case "term_in":
+        terms.input(sid, String(msg["d"] ?? ""));
+        return;
+      case "term_size":
+        terms.resize(sid, Number(msg["cols"]), Number(msg["rows"]));
+        return;
+      case "term_kill":
+        terms.kill(sid);
+        return;
     }
     // commands for an attached CLI session are forwarded to its socket
     const cli = cliSessions.get(sid);
@@ -274,6 +305,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         void session?.setupRecheck();
         break;
       case "close_session":
+        terms.kill(sid);
         manager.close(sid);
         broadcastSessions();
         break;
@@ -293,6 +325,12 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       if (url.pathname === "/zen.mp3") {
         return new Response(Bun.file(zenMp3Path), { headers: { "content-type": "audio/mpeg" } });
       }
+      if (url.pathname === "/xterm.js")
+        return new Response(xtermJsRaw as unknown as string, { headers: { "content-type": "text/javascript" } });
+      if (url.pathname === "/xterm-fit.js")
+        return new Response(xtermFitRaw as unknown as string, { headers: { "content-type": "text/javascript" } });
+      if (url.pathname === "/xterm.css")
+        return new Response(xtermCssRaw as unknown as string, { headers: { "content-type": "text/css" } });
       return new Response(indexHtml, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
@@ -321,6 +359,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       close(ws) {
         if (ws.data.kind === "cli") {
           if (ws.data.sid) {
+            terms.kill(ws.data.sid);
             cliSessions.delete(ws.data.sid);
             broadcastSessions();
           }
