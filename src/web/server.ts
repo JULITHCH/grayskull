@@ -26,6 +26,11 @@ import type { TranscriptItem } from "../types";
 
 const indexHtml = indexHtmlRaw as unknown as string;
 
+/** Build fingerprint of the embedded UI — sent in the WS hello. A browser tab
+ *  that reconnects (server restarted) and sees a different hash is running a
+ *  stale build and reloads itself; no cache to bust since nothing is cached. */
+const UI_BUILD = Bun.hash(indexHtml).toString(36);
+
 /** PWA manifest — installable standalone app (requires a secure context:
  *  localhost, an ssh port-forward, or https). */
 const MANIFEST = JSON.stringify({
@@ -383,7 +388,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       open(ws) {
         if (ws.data.kind === "cli") return; // waits for its register message
         browsers.add(ws);
-        ws.send(JSON.stringify({ t: "hello", defaultCwd: opts.defaultCwd }));
+        ws.send(JSON.stringify({ t: "hello", defaultCwd: opts.defaultCwd, build: UI_BUILD }));
         ws.send(JSON.stringify({ t: "sessions", list: sessionList() }));
         broadcastAuto();
         for (const s of manager.sessions.values()) {

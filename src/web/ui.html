@@ -1104,7 +1104,20 @@ const send = (o) => S.ws?.readyState === 1 && S.ws.send(JSON.stringify(o));
 
 function handle(m) {
   switch (m.t) {
-    case "hello": S.defaultCwd = m.defaultCwd; break;
+    case "hello":
+      S.defaultCwd = m.defaultCwd;
+      // auto-update: reconnected to a server serving a NEWER ui build → this
+      // tab is stale. Save the prompt draft, reload, restore.
+      if (m.build) {
+        if (S.build && S.build !== m.build) {
+          try { sessionStorage.gsDraft = $("promptInput").value; } catch {}
+          $("connChip").textContent = "⟳ new build — reloading…";
+          setTimeout(() => location.reload(), 400);
+          return;
+        }
+        S.build = m.build;
+      }
+      break;
     case "sessions":
       S.sessions = m.list;
       // default to a live session; parked ones need an explicit resume click
@@ -2813,6 +2826,13 @@ function renderAll() { renderItems(); renderLive(); renderStatus(); renderMemory
 setInterval(() => { $("clockChip").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
 setTheme((() => { try { return localStorage.getItem("gs_theme") || "matrix"; } catch { return "matrix"; } })());
 bdInit();
+// restore the prompt draft saved across an auto-update reload
+try {
+  if (sessionStorage.gsDraft) {
+    $("promptInput").value = sessionStorage.gsDraft;
+    sessionStorage.removeItem("gsDraft");
+  }
+} catch {}
 connect();
 setTimeout(() => $("boot").classList.add("gone"), 700);
 </script>

@@ -589,6 +589,8 @@ WebSockets, zero frontend build). This is the recommended way to drive GRAYSKULL
   you're not looking at the tab; clicking the notification focuses the app. Both
   need a secure context: open via `localhost` (e.g. `ssh -L 4242:host:4242`) or
   https — plain `http://<lan-ip>` is blocked by the browser, the bell explains this.
+  Open tabs **auto-update**: the server fingerprints its embedded UI, and a tab that
+  reconnects to a newer build reloads itself (prompt draft preserved).
 
 **CLI sessions join the hub.** Every terminal `grayskull` automatically connects to a
 running grayskull-web (retrying quietly in the background, `⇄ web` in the statusline
