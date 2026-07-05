@@ -562,7 +562,14 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   body.drawer #sessions { transform: none; }
   #sessions::before, #sessions::after { display: none; }
   #sessionList { flex: 0 1 auto; }
-  .sess { padding: 12px 12px; }
+  /* the ✕ was a 14px target glued to a select-on-tap row — impossible to hit
+     with a finger. Make the whole right edge a 46px close/delete tap zone. */
+  .sess { padding: 13px 52px 13px 12px; position: relative; }
+  .sess .sessClose { position: absolute; top: 0; right: 0; bottom: 0; width: 46px;
+    float: none; padding: 0; margin: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 18px; color: var(--g-dim);
+    border-left: 1px solid var(--g-faint); }
+  .sess .sessClose:active { color: var(--red); background: var(--sel); }
   #sessBtns button { padding: 11px; }
   #sessions .drawNav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 14px;
     border-top: 1px solid var(--g-faint); margin-top: 6px; overflow-y: auto; }
