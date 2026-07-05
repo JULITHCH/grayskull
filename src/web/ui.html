@@ -804,6 +804,19 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   </div>
 </div></div>
 
+<!-- in-page confirm/prompt/alert — replaces the browser's native dialogs.
+     Last in the DOM so it stacks above every other modal (setup etc.). -->
+<div class="modal-bg" id="dlgModalBg"><div class="modal" style="width:min(460px,92vw)">
+  <h3 id="dlgTitle">CONFIRM</h3>
+  <div class="body" id="dlgBody"></div>
+  <div class="actions">
+    <input id="dlgInput" style="display:none" spellcheck="false">
+    <div style="flex:1"></div>
+    <button class="btn" id="dlgCancel">CANCEL</button>
+    <button class="btn" id="dlgOk">OK</button>
+  </div>
+</div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -1199,9 +1212,8 @@ function handle(m) {
     case "chain_saved": closeModal("chainModalBg"); break;
     case "chain_error": toast(m.message || "chain save failed"); break;
     case "confirm_create":
-      if (confirm("Directory doesn't exist:\n" + m.cwd + "\n\nCreate it and start the session?")) {
-        send({ t: "new_session", cwd: m.cwd, create: true });
-      }
+      void uiConfirm("CREATE DIRECTORY", `Directory doesn't exist:\n${m.cwd}\n\nCreate it and start the session?`, { okLabel: "CREATE" })
+        .then((ok) => { if (ok) send({ t: "new_session", cwd: m.cwd, create: true }); });
       break;
     case "error": toast(m.text); break;
   }
@@ -1242,21 +1254,26 @@ function selectSession(sid) { S.current = sid; S.openTools.clear(); renderSessio
 function resumeSession(sid) { S.current = sid; send({ t: "resume_session", sid }); }
 function deleteSession(sid, ev) {
   ev.stopPropagation();
-  if (!confirm("Delete this saved session permanently? Its transcript and conversation are removed from disk.")) return;
-  send({ t: "delete_session", sid });
-  termDispose(sid);
-  if (S.current === sid) S.current = null;
+  void uiConfirm("DELETE SESSION", "Delete this saved session permanently? Its transcript and conversation are removed from disk.", { danger: true, okLabel: "DELETE" }).then((ok) => {
+    if (!ok) return;
+    send({ t: "delete_session", sid });
+    termDispose(sid);
+    if (S.current === sid) S.current = null;
+  });
 }
 function closeSession(sid, ev) {
   ev.stopPropagation();
-  if (!confirm(`Close session ${sid}? It stays in the list and can be resumed; its MCP servers are freed.`)) return;
-  send({ t: "close_session", sid });
-  termDispose(sid);
-  if (S.current === sid) S.current = null;
+  void uiConfirm("CLOSE SESSION", `Close session ${sid}? It stays in the list and can be resumed; its MCP servers are freed.`, { okLabel: "CLOSE" }).then((ok) => {
+    if (!ok) return;
+    send({ t: "close_session", sid });
+    termDispose(sid);
+    if (S.current === sid) S.current = null;
+  });
 }
 $("newSess").onclick = () => {
-  const cwd = prompt("project directory:", S.defaultCwd);
-  if (cwd) send({ t: "new_session", cwd });
+  void uiPrompt("NEW PROJECT SESSION", "project directory:", { value: S.defaultCwd }).then((cwd) => {
+    if (cwd) send({ t: "new_session", cwd });
+  });
 };
 $("newChat").onclick = () => send({ t: "new_session", kind: "chat" });
 
@@ -1345,7 +1362,8 @@ function saveWorkerCfg() {
   closeModal("wcfgModalBg");
 }
 function workerDelete(name) {
-  if (confirm(`Delete worker "${name}" and its stored credentials?`)) send({ t: "worker_delete", name });
+  void uiConfirm("DELETE WORKER", `Delete worker "${name}" and its stored credentials?`, { danger: true, okLabel: "DELETE" })
+    .then((ok) => { if (ok) send({ t: "worker_delete", name }); });
 }
 function openWorkerRun(name) {
   const w = S.auto.workers.find((x) => x.name === name);
@@ -1411,7 +1429,8 @@ function saveJob() {
   closeModal("jobModalBg");
 }
 function jobDelete(name) {
-  if (confirm(`Delete job "${name}"?`)) send({ t: "job_delete", name });
+  void uiConfirm("DELETE JOB", `Delete job "${name}"?`, { danger: true, okLabel: "DELETE" })
+    .then((ok) => { if (ok) send({ t: "job_delete", name }); });
 }
 $("newWorkerBtn").onclick = openNewWorker;
 $("newJobBtn").onclick = () => {
@@ -1760,6 +1779,13 @@ addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "`") { e.preventDefault(); termToggle(); return; }
   // keys typed into the terminal belong to the shell (esc = vim, not interrupt)
   if (e.target?.closest?.("#termPanel")) return;
+  // in-page dialog: enter confirms (unless typing in its prompt input, which
+  // has its own handler), esc cancels — checked before everything else
+  if ($("dlgModalBg").classList.contains("open")) {
+    if (e.key === "Enter" && DLG.mode !== "prompt") { e.preventDefault(); return $("dlgOk").click(); }
+    if (e.key === "Escape") { e.preventDefault(); return dlgClose(dlgCancelValue()); }
+    return;
+  }
   if (e.key === "Escape") {
     if (document.body.classList.contains("zen")) return toggleZen(false);
     if ($("paletteBg").classList.contains("open")) return closeModal("paletteBg");
@@ -1864,7 +1890,7 @@ function notifRender() {
 }
 $("notifBtn").onclick = async () => {
   if (!notifSupported()) {
-    alert("Notifications need a secure context.\nOpen via localhost (e.g. ssh -L 4242:host:4242) or https — plain http on a LAN IP is blocked by the browser.");
+    void uiAlert("NOTIFICATIONS", "Notifications need a secure context.\nOpen via localhost (e.g. ssh -L 4242:host:4242) or https — plain http on a LAN IP is blocked by the browser.");
     return;
   }
   if (notifOn()) { localStorage.gsNotify = "off"; }
@@ -2595,10 +2621,11 @@ function setupApplyField(inp) {
   send({ t: "setup_apply", sid: S.current, id, value });
 }
 function setupAddPreset() {
-  const name = prompt("name for the new LLM preset (cloned from the active stack):");
-  if (!name || !name.trim()) return;
-  SETUP.dirty.add("models");
-  send({ t: "setup_preset_add", sid: S.current, name: name.trim() });
+  void uiPrompt("ADD LLM PRESET", "name for the new LLM preset (cloned from the active stack):", { placeholder: "my-model" }).then((name) => {
+    if (!name) return;
+    SETUP.dirty.add("models");
+    send({ t: "setup_preset_add", sid: S.current, name });
+  });
 }
 function setupRemovePreset(name) {
   SETUP.dirty.add(name.startsWith("family:") ? "families" : "models");
@@ -2609,10 +2636,11 @@ function setupSave() {
 }
 function setupRecheck() { send({ t: "setup_recheck", sid: S.current }); }
 function setupAddFamily() {
-  const name = prompt("name for the new model family (cloned from the active family; same name as a built-in overrides it):");
-  if (!name || !name.trim()) return;
-  SETUP.dirty.add("families");
-  send({ t: "setup_family_add", sid: S.current, name: name.trim() });
+  void uiPrompt("ADD MODEL FAMILY", "name for the new model family (cloned from the active family; same name as a built-in overrides it):", { placeholder: "my-family" }).then((name) => {
+    if (!name) return;
+    SETUP.dirty.add("families");
+    send({ t: "setup_family_add", sid: S.current, name });
+  });
 }
 function mdSearch() {
   const q = (SETUP.md.q || "").trim();
@@ -2926,6 +2954,46 @@ selectSession = (sid) => { _select(sid); if (innerWidth <= 900) document.querySe
 
 /* ═══════════ misc + boot ═══════════ */
 function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
+
+/* ═══════════ in-page dialogs — no native confirm/prompt/alert ═══════════ */
+const DLG = { resolve: null, mode: "confirm" };
+function dlgCancelValue() { return DLG.mode === "prompt" ? null : false; }
+function dlgClose(result) {
+  if (!DLG.resolve) return;
+  const r = DLG.resolve;
+  DLG.resolve = null;
+  closeModal("dlgModalBg");
+  r(result);
+}
+function dlgOpen(mode, title, message, opts = {}) {
+  return new Promise((resolve) => {
+    dlgClose(dlgCancelValue()); // a dialog opened over a stray one cancels it
+    DLG.resolve = resolve;
+    DLG.mode = mode;
+    $("dlgTitle").textContent = title;
+    $("dlgBody").textContent = message;
+    const inp = $("dlgInput");
+    inp.style.display = mode === "prompt" ? "" : "none";
+    inp.value = opts.value || "";
+    inp.placeholder = opts.placeholder || "";
+    $("dlgCancel").style.display = mode === "alert" ? "none" : "";
+    const ok = $("dlgOk");
+    ok.textContent = opts.okLabel || (mode === "confirm" ? "CONFIRM" : "OK");
+    ok.classList.toggle("danger", !!opts.danger);
+    $("dlgModalBg").classList.add("open");
+    if (mode === "prompt") setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  });
+}
+/** uiConfirm(title, msg, {danger, okLabel}) → Promise<boolean> */
+const uiConfirm = (title, msg, opts) => dlgOpen("confirm", title, msg, opts);
+/** uiPrompt(title, msg, {value, placeholder, okLabel}) → Promise<string|null> (trimmed; null = cancelled) */
+const uiPrompt = (title, msg, opts) => dlgOpen("prompt", title, msg, opts);
+/** uiAlert(title, msg) → Promise<void-ish> — single OK button */
+const uiAlert = (title, msg) => dlgOpen("alert", title, msg);
+$("dlgOk").onclick = () => dlgClose(DLG.mode === "prompt" ? $("dlgInput").value.trim() : true);
+$("dlgCancel").onclick = () => dlgClose(dlgCancelValue());
+$("dlgInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("dlgOk").click(); } });
+$("dlgModalBg").addEventListener("mousedown", (e) => { if (e.target === $("dlgModalBg")) dlgClose(dlgCancelValue()); });
 function renderAll() { renderItems(); renderLive(); renderStatus(); renderMemory(); renderMesh(); renderOps(); }
 setInterval(() => { $("clockChip").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
 setTheme((() => { try { return localStorage.getItem("gs_theme") || "matrix"; } catch { return "matrix"; } })());
