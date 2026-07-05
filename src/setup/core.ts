@@ -16,7 +16,7 @@ import type { LlmClient } from "../llm/client";
  *  and applyField/saveGlobal handle any spec key generically. Extending the
  *  configuration = adding one FieldSpec line. */
 
-export type FieldKind = "text" | "number" | "enum" | "toggle";
+export type FieldKind = "text" | "number" | "enum" | "toggle" | "secret";
 
 export interface FieldSpec {
   /** settings/preset property name — may be a dotted path (family presets) */
@@ -224,6 +224,23 @@ export function listGroups(settings: Settings): SetupGroup[] {
       { id: "mcp.searxng.url", label: "searxng URL", kind: "text", value: getSearxngUrl(settings) },
     ],
   });
+  // web login: write-only — the field is always blank, only the argon2id hash
+  // is ever stored; the running server re-reads it after SAVE (auth.ts)
+  groups.push({
+    id: "weblogin",
+    title: "WEB LOGIN",
+    fields: [
+      {
+        id: "web.password",
+        label: "login password",
+        kind: "secret",
+        value: "",
+        hint: settings.web.passwordHash
+          ? "● enabled — type a new password to change it, \"off\" to disable; SAVE applies"
+          : "○ DISABLED — anyone reaching the port controls the agent; type a password, then SAVE",
+      },
+    ],
+  });
   return groups;
 }
 
@@ -265,6 +282,14 @@ export function applyField(id: string, value: string, ctx: ApplyContext): boolea
     if (!v || !cfg || !("command" in cfg)) return false;
     cfg.env = { ...cfg.env, SEARXNG_URL: v };
     void mcp.reconnect("searxng", settings).then(() => ctx.onAsyncChange?.());
+    return true;
+  }
+
+  if (id === "web.password") {
+    const v = value.trim();
+    if (!v) return false;
+    if (v.toLowerCase() === "off") delete (settings.web as { passwordHash?: string }).passwordHash;
+    else settings.web.passwordHash = Bun.password.hashSync(v); // ~100ms argon2id, fine for a settings edit
     return true;
   }
 
@@ -406,6 +431,11 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
       // patch the whole top-level segment (memory.enabled → the memory object)
       const seg = id.slice(5).split(".")[0]!;
       raw[seg] = (settings as unknown as Record<string, unknown>)[seg];
+    } else if (id === "web.password") {
+      // only the hash key — never dump merged web defaults into the file
+      const web = (raw["web"] ??= {}) as Record<string, unknown>;
+      if (settings.web.passwordHash) web["passwordHash"] = settings.web.passwordHash;
+      else delete web["passwordHash"];
     }
   }
   writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");

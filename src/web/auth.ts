@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, chmodSync, statSync } from "node:fs";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { GLOBAL_DIR } from "../config/paths";
+import { GLOBAL_DIR, GLOBAL_SETTINGS } from "../config/paths";
 
 /**
  * Login for grayskull-web — the interface drives a shell-wielding agent, so an
@@ -22,6 +22,36 @@ import { GLOBAL_DIR } from "../config/paths";
 
 export const COOKIE_NAME = "gs_auth";
 const SECRET_FILE = join(GLOBAL_DIR, "web-secret");
+
+/** Live view of the web-login config: re-reads the raw global settings.json
+ *  when its mtime changes, so a password set in the ⚙ settings GUI (or via
+ *  --set-password) takes effect on the next request — no server restart. */
+export class AuthConfig {
+  private mtime = -1;
+  private cached: { hash?: string; days: number } = { days: 30 };
+
+  get(): { hash?: string; days: number } {
+    try {
+      const st = statSync(GLOBAL_SETTINGS);
+      if (st.mtimeMs !== this.mtime) {
+        const raw = JSON.parse(readFileSync(GLOBAL_SETTINGS, "utf8")) as Record<string, unknown>;
+        const web = (raw["web"] ?? {}) as Record<string, unknown>;
+        const days = Number(web["sessionDays"]);
+        const next: { hash?: string; days: number } = { days: days > 0 ? days : 30 };
+        if (typeof web["passwordHash"] === "string" && web["passwordHash"]) {
+          next.hash = web["passwordHash"];
+        }
+        this.cached = next;
+        this.mtime = st.mtimeMs; // only after a successful parse
+      }
+    } catch {
+      // missing file on first run = auth off; on a transient read/parse error
+      // keep the last known config rather than silently dropping the gate
+      if (this.mtime === -1 && !existsSync(GLOBAL_SETTINGS)) this.cached = { days: 30 };
+    }
+    return this.cached;
+  }
+}
 
 export function loadOrCreateSecret(): Buffer {
   if (existsSync(SECRET_FILE)) {

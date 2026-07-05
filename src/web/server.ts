@@ -23,7 +23,7 @@ import { runWorker } from "../workers/runtime";
 import { CHATS_CWD } from "./persist";
 import {
   loadOrCreateSecret, makeToken, checkToken, cookieValue, authCookie, clearCookie,
-  isHttps, isLoopback, loginPage, LoginLimiter, COOKIE_NAME,
+  isHttps, isLoopback, loginPage, LoginLimiter, COOKIE_NAME, AuthConfig,
 } from "./auth";
 import { LlmClient } from "../llm/client";
 import type { TranscriptItem } from "../types";
@@ -365,20 +365,21 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   };
 
   // ── login (web/auth.ts): everything except /login, the PWA manifest/icons
-  // and the loopback-only /cli endpoint requires the auth cookie ──
-  const authSettings = loadSettings(opts.defaultCwd).web;
-  const authOn = !!authSettings.passwordHash;
+  // and the loopback-only /cli endpoint requires the auth cookie. AuthConfig
+  // re-reads settings.json on change, so a password set in the ⚙ settings GUI
+  // arms the gate without a restart ──
+  const auth = new AuthConfig();
   const secret = loadOrCreateSecret();
   const limiter = new LoginLimiter();
-  if (!authOn && opts.hostname !== "127.0.0.1" && opts.hostname !== "localhost") {
+  if (!auth.get().hash && opts.hostname !== "127.0.0.1" && opts.hostname !== "localhost") {
     console.warn(
       "⚠ grayskull-web has NO login password and binds " + opts.hostname +
       " — anyone who reaches this port controls a shell-wielding agent." +
-      " Set one: grayskull-web --set-password",
+      " Set one in ⚙ settings (SERVICES tab) or: grayskull-web --set-password",
     );
   }
   const authed = (req: Request): boolean =>
-    !authOn || checkToken(secret, cookieValue(req, COOKIE_NAME));
+    !auth.get().hash || checkToken(secret, cookieValue(req, COOKIE_NAME));
 
   const server = Bun.serve<WsData, never>({
     port: opts.port,
@@ -392,7 +393,8 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         return new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/login" && req.method === "POST") {
-        if (!authOn) return Response.redirect("/", 302);
+        const cfg = auth.get();
+        if (!cfg.hash) return Response.redirect("/", 302);
         const ip = srv.requestIP(req)?.address ?? "?";
         if (!limiter.allowed(ip)) {
           return new Response(loginPage("too many attempts — wait a few minutes"), {
@@ -401,7 +403,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         }
         const body = await req.text().catch(() => "");
         const password = new URLSearchParams(body).get("password") ?? "";
-        const ok = password && (await Bun.password.verify(password, authSettings.passwordHash!).catch(() => false));
+        const ok = password && (await Bun.password.verify(password, cfg.hash).catch(() => false));
         if (!ok) {
           return new Response(loginPage("wrong password"), {
             status: 401, headers: { "content-type": "text/html; charset=utf-8" },
@@ -411,7 +413,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
           status: 302,
           headers: {
             location: "/",
-            "set-cookie": authCookie(makeToken(secret, authSettings.sessionDays), authSettings.sessionDays, isHttps(req)),
+            "set-cookie": authCookie(makeToken(secret, cfg.days), cfg.days, isHttps(req)),
           },
         });
       }

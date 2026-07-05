@@ -2489,6 +2489,8 @@ function setupFieldHtml(f) {
       <option value="off"${f.value !== "on" ? " selected" : ""}>off</option>
       <option value="on"${f.value === "on" ? " selected" : ""}>on</option>
     </select>`;
+  } else if (f.kind === "secret") {
+    control = `<input style="flex:1" type="password" data-fid="${escA(f.id)}" value="" placeholder="••••••••" autocomplete="new-password" onchange="setupApplyField(this)">`;
   } else {
     control = `<input style="flex:1" data-fid="${escA(f.id)}" value="${escA(f.value)}"${f.kind === "number" ? ' inputmode="decimal"' : ""} onchange="setupApplyField(this)">`;
   }
