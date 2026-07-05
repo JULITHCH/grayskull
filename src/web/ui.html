@@ -135,6 +135,8 @@ body.zen #zenCube { display: block; }
 .gutter.h::after { inset: 2px 0; }
 .gutter:hover::after, .gutter.drag::after { background: var(--g-dim); box-shadow: 0 0 6px var(--glow); }
 #tabs { display: none; }
+/* mobile-only app-shell chrome — hidden on desktop */
+#mbar, #scrim, #sessions .drawNav { display: none; }
 
 /* ── sci-fi panel chrome: corner brackets ── */
 .panel { position: relative; border: 1px solid var(--g-faint); background: var(--panel);
@@ -513,43 +515,99 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   transition: opacity .5s; }
 #boot.gone { opacity: 0; pointer-events: none; }
 
-/* ── mobile: single panel + top tab bar ──────────────────────── */
+/* ── mobile: a Claude-style app shell (top bar · full-screen chat ·
+      rounded bottom composer · slide-in drawer for everything else) ── */
 @media (max-width: 900px) {
-  html, body { overflow-x: hidden; } /* hard stop: the page must never scroll sideways */
+  html, body { overflow-x: hidden; }
   body { font-size: 14px; }
-  #app { grid-template-columns: 1fr; grid-template-rows: 40px 42px 1fr; gap: 6px; padding: 6px; max-width: 100vw; }
-  /* chips must stay reachable — swipe sideways instead of clipping them off */
-  header { grid-column: 1; padding: 0 8px; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-  header::-webkit-scrollbar { display: none; }
-  header .logo { font-size: 13px; letter-spacing: 2px; }
-  #modelChip, #clockChip, #zenBtn { display: none; }
-  #setupBtn { padding: 4px 10px; } /* bigger tap target */
-  .setupGrid { grid-template-columns: 1fr; }
-  .setupTabs .stab { padding: 6px 10px; }
-  .modal .actions { flex-wrap: wrap; }
+
+  /* app = vertical stack: top bar, then the active view */
+  #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+    grid-template: none; gap: 0; padding: 0; max-width: 100vw; }
+  header, #tabs, .gutter { display: none !important; }
   #right { display: contents; }
-  .gutter { display: none !important; }
-  #sessions, #main, #mesh, #memPanel, #ops, #autoPanel { grid-row: 3; grid-column: 1; display: none; min-height: 0; }
+
+  /* top bar */
+  #mbar { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 52px;
+    padding: 0 8px; padding-top: env(safe-area-inset-top); box-sizing: content-box;
+    border-bottom: 1px solid var(--g-faint); background: var(--panel); position: relative; z-index: 20; }
+  #mbar .mbtn { flex: 0 0 auto; width: 40px; height: 40px; display: flex; align-items: center;
+    justify-content: center; border: 1px solid var(--g-faint); border-radius: 9px;
+    color: var(--g); font-size: 18px; cursor: pointer; background: none; }
+  #mbar .mbtn:active { background: var(--sel); }
+  #mbar .mtitle { flex: 1; min-width: 0; text-align: center; color: var(--fg); font-size: 13px;
+    letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* the chat panel fills the rest; the sci-fi frame is dropped */
+  #main { flex: 1; min-height: 0; min-width: 0; display: none; border: none; box-shadow: none; }
+  #main::before, #main::after { display: none; }
   body[data-tab="chat"] #main { display: flex; }
-  body[data-tab="sess"] #sessions { display: flex; }
+
+  /* analytics views: full-screen overlays under the bar, one at a time */
+  #mesh, #memPanel, #ops, #autoPanel { position: fixed; left: 0; right: 0; bottom: 0;
+    top: calc(52px + env(safe-area-inset-top)); z-index: 15; display: none; min-height: 0; }
   body[data-tab="mesh"] #mesh { display: flex; }
   body[data-tab="brain"] #memPanel { display: flex; }
   body[data-tab="ops"] #ops { display: flex; }
   body[data-tab="auto"] #autoPanel { display: flex; }
-  #tabs { display: flex; grid-row: 2; grid-column: 1; gap: 6px; }
-  #tabs button { flex: 1; background: var(--panel); border: 1px solid var(--g-faint); color: var(--g-dim);
-    font-family: inherit; font-size: 11px; letter-spacing: 1px; cursor: pointer; padding: 0; }
-  #tabs button.active { color: var(--g); border-color: var(--g); text-shadow: 0 0 6px var(--g); }
-  button.btn, .modeBtn { padding: 9px 12px; }
-  .modeBtn { font-size: 9px; padding: 6px 6px; }
-  #statusBar { flex-wrap: wrap; gap: 8px; }
-  #promptInput { font-size: 16px; }
-  /* the temp slider doesn't earn its width on a phone — /setup has the knob */
+
+  /* ── drawer: the SESSIONS panel slides in from the left ── */
+  #scrim { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.55);
+    opacity: 0; pointer-events: none; transition: opacity .22s; }
+  body.drawer #scrim { opacity: 1; pointer-events: auto; }
+  #sessions { display: flex !important; position: fixed; top: 0; left: 0; bottom: 0;
+    width: min(85vw, 340px); z-index: 60; border: none; border-right: 1px solid var(--g);
+    box-shadow: 6px 0 30px rgba(0,0,0,.6); transform: translateX(-100%);
+    transition: transform .24s cubic-bezier(.3,.7,.2,1); padding-top: env(safe-area-inset-top); }
+  body.drawer #sessions { transform: none; }
+  #sessions::before, #sessions::after { display: none; }
+  #sessionList { flex: 0 1 auto; }
+  .sess { padding: 12px 12px; }
+  #sessBtns button { padding: 11px; }
+  #sessions .drawNav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 14px;
+    border-top: 1px solid var(--g-faint); margin-top: 6px; overflow-y: auto; }
+  .drawNav .dvh { font-size: 9px; letter-spacing: 2px; color: var(--g-dim); margin: 8px 4px 3px; }
+  .drawNav button { text-align: left; background: none; border: 1px solid transparent; color: var(--fg);
+    font-family: inherit; font-size: 13px; padding: 10px 10px; cursor: pointer; border-radius: 8px; }
+  .drawNav button:active { background: var(--sel); border-color: var(--g-faint); }
+
+  /* ── chat: comfortable bubbles ── */
+  #transcript { padding: 12px 12px 4px; }
+  .item { margin: 10px 0; }
+  .item.user { background: var(--sel); border: none; border-radius: 15px 15px 4px 15px;
+    padding: 10px 13px; margin-left: auto; width: fit-content; max-width: 86%; }
+  .item.assistant { padding: 0 2px; }
+  .msg-img { max-width: 70vw; }
+
+  /* ── composer: rounded field + round send button ── */
+  #inputBar { flex: 0 0 auto; border: none; border-top: 1px solid var(--g-faint);
+    padding: 8px 10px; padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 8px; align-items: flex-end; }
+  #promptInput { font-size: 16px; border-radius: 20px; padding: 11px 15px; min-height: 44px; }
   #tempCtl { display: none; }
-  #inputBar { padding: 6px; gap: 6px; }
-  #sendBtn, #stopBtn { padding: 9px 10px; flex: 0 0 auto; }
-  .modal { width: 96vw; max-height: 90vh; }
-  #backdrop { opacity: .5; }
+  #sendBtn, #stopBtn { flex: 0 0 auto; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    font-size: 0; display: flex; align-items: center; justify-content: center; }
+  #sendBtn::after { content: "↑"; font-size: 21px; font-weight: 700; }
+  #stopBtn::after { content: "■"; font-size: 15px; }
+  /* one button at a time: send while idle, stop while generating */
+  #stopBtn { display: none; }
+  body.generating #stopBtn { display: flex; }
+  body.generating #sendBtn { display: none; }
+
+  /* ── status bar: slim, scrollable modes, drop desktop-only stats ── */
+  #statusBar { flex: 0 0 auto; gap: 8px; overflow-x: auto; scrollbar-width: none;
+    padding: 6px 10px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  #statusBar::-webkit-scrollbar { display: none; }
+  #modeBtns { flex: 0 0 auto; gap: 4px; }
+  .modeBtn { font-size: 10px; padding: 7px 9px; }
+  #termBtn, #tpsTxt, #tokTxt { display: none; }
+  #ctxBar { width: 60px; }
+
+  .setupGrid { grid-template-columns: 1fr; }
+  .setupTabs .stab { padding: 7px 11px; }
+  .modal .actions { flex-wrap: wrap; }
+  .modal { width: 96vw; max-height: 88vh; }
+  #backdrop { opacity: .35; }
 }
 </style>
 </head>
@@ -579,6 +637,15 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     <div class="chip" id="connChip">connecting…</div>
   </header>
 
+  <!-- mobile app-shell top bar (hidden on desktop) -->
+  <div id="mbar">
+    <div class="mbtn" id="mMenuBtn" onclick="mBarLeft()" aria-label="menu">☰</div>
+    <div class="mtitle" id="mTitle">GRAYSKULL</div>
+    <div class="mbtn" onclick="$('setupBtn').click()" aria-label="settings">⚙</div>
+    <div class="mbtn" onclick="openPalette()" aria-label="command palette">⌕</div>
+  </div>
+  <div id="scrim" onclick="closeDrawer()"></div>
+
   <div class="panel" id="sessions">
     <h2><span class="led" id="sessLed"></span>SESSIONS</h2>
     <div id="sessionList"></div>
@@ -586,6 +653,18 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
       <button id="newChat" title="folder-less quick chat">+ CHAT</button>
       <button id="newSess" title="project session in a directory">+ PROJECT</button>
     </div>
+    <!-- drawer-only nav to the other views + actions (mobile) -->
+    <nav class="drawNav">
+      <div class="dvh">VIEWS</div>
+      <button onclick="mGo('mesh')">⚔ Agent mesh</button>
+      <button onclick="mGo('brain')">🧠 Memory</button>
+      <button onclick="mGo('ops')">⛓ Chain &amp; todo</button>
+      <button onclick="mGo('auto')">⚙ Workers &amp; jobs</button>
+      <div class="dvh">SYSTEM</div>
+      <button onclick="toggleZen();closeDrawer()">◱ Zen ocean</button>
+      <button onclick="$('setupBtn').click();closeDrawer()">⚙ Settings</button>
+      <button onclick="location.href='/logout'">⏻ Logout</button>
+    </nav>
   </div>
   <div class="gutter v" id="gutL" title="drag to resize · double-click to reset"></div>
 
@@ -1540,6 +1619,8 @@ function renderLive() {
     (st.text ? `<div class="stream cursor">${esc(st.text)}</div>` : "") +
     (stat.busy ? `<div class="working">${SPIN[spinFrame]} ${esc(stat.what || "working")}… <span class="hint">${busyProgress(sid)}</span> <span class="hint">(esc)</span><span class="cancel" onclick="interrupt()">✕ CANCEL</span></div>` : "");
   $("stopBtn").classList.toggle("armed", !!stat.busy);
+  // mobile composer swaps the send button for stop while generating
+  document.body.classList.toggle("generating", !!stat.busy);
   zenStreamRender();
   maybeScroll();
 }
@@ -2907,17 +2988,58 @@ function renderOps() {
   }
 })();
 
-/* ═══════════ mobile tabs ═══════════ */
+/* ═══════════ mobile app-shell: drawer + top bar + view switch ═══════════ */
 document.body.dataset.tab = "chat";
-document.querySelectorAll("#tabs button").forEach((b) => {
-  b.onclick = () => {
-    document.body.dataset.tab = b.dataset.tab;
-    document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
-    requestAnimationFrame(() => { renderMesh(); renderMemory(); renderOps(); renderItems(); renderLive(); });
-  };
-});
+const VIEW_TITLES = { chat: "", mesh: "AGENT MESH", brain: "MEMORY", ops: "CHAIN // TODO", auto: "WORKERS // JOBS" };
+const isMobile = () => innerWidth <= 900;
+
+function openDrawer() { document.body.classList.add("drawer"); }
+function closeDrawer() { document.body.classList.remove("drawer"); }
+
+/** Switch the active mobile view (also used by the hidden desktop #tabs). */
+function mGo(tab) {
+  document.body.dataset.tab = tab;
+  document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
+  closeDrawer();
+  updateMTitle();
+  requestAnimationFrame(() => { renderMesh(); renderMemory(); renderOps(); renderItems(); renderLive(); });
+}
+
+/** Top-bar left button: back-to-chat when on another view, else open the drawer.
+ *  Its glyph reflects which it'll do. */
+function mBarLeft() {
+  if (document.body.dataset.tab !== "chat") return mGo("chat");
+  document.body.classList.contains("drawer") ? closeDrawer() : openDrawer();
+}
+function updateMTitle() {
+  const tab = document.body.dataset.tab;
+  const menu = $("mMenuBtn");
+  if (tab !== "chat") {
+    $("mTitle").textContent = VIEW_TITLES[tab] || tab.toUpperCase();
+    menu.textContent = "‹"; // back to chat
+    return;
+  }
+  menu.textContent = "☰";
+  const s = S.sessions.find((x) => x.sid === S.current);
+  $("mTitle").textContent = s ? sessLabel(s) : "GRAYSKULL // WEB";
+}
+
+document.querySelectorAll("#tabs button").forEach((b) => { b.onclick = () => mGo(b.dataset.tab); });
+
 const _select = selectSession;
-selectSession = (sid) => { _select(sid); if (innerWidth <= 900) document.querySelector('#tabs button[data-tab="chat"]')?.click(); };
+selectSession = (sid) => {
+  _select(sid);
+  if (isMobile()) { closeDrawer(); mGo("chat"); }
+};
+// keep the mobile title in sync as sessions/status arrive
+const _renderSessions = renderSessions;
+renderSessions = () => { _renderSessions(); if (isMobile()) updateMTitle(); };
+// the verbose desktop placeholder gets clipped in the rounded mobile field
+const DESKTOP_PH = $("promptInput").placeholder;
+function syncPlaceholder() { $("promptInput").placeholder = isMobile() ? "Message GRAYSKULL…" : DESKTOP_PH; }
+addEventListener("resize", () => { if (!isMobile()) closeDrawer(); updateMTitle(); syncPlaceholder(); });
+updateMTitle();
+syncPlaceholder();
 
 /* ═══════════ misc + boot ═══════════ */
 function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
