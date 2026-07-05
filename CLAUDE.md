@@ -39,6 +39,13 @@ rendered dimmed, never scanned for tool calls.
   a render+instrument+assert procedure (window.__game debug hook, browser_evaluate
   invariants, screenshot). Config `visualVerify.enabled`; `canvastest` skill
   (examples/skills/) is the deep playbook. Born from the pacman5 postmortem.
+- `agent/plan.ts` — plan-first gate: substantial turn (creation/restructure
+  vocabulary en/de) → `runToolLoop`'s `beforeEdit` hook refuses the first code edit
+  (once) until a blueprint exists in `.grayskull/plans/`, injecting the
+  research→blueprint→review procedure; proactive systemHint + triage/blueprint
+  workflow in DEFAULT_SYSTEM_PROMPT (TRIVIAL vs SUBSTANTIAL, 5 phases:
+  research/blueprint/review/execute/verify). Chain steps exempt (chainStepActive,
+  runIsolated disarms). Config `planFirst.enabled`.
 - `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
   (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
   in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`
@@ -101,6 +108,11 @@ rendered dimmed, never scanned for tool calls.
   bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask
   maps). Agent-mesh events come from the `monitor` callback in `agents/runner.ts`.
   Frontend is one self-contained ui.html (vanilla JS, matrix rain, SVG node graph).
+  `term.ts`: per-session PTY shells (Bun.spawn `terminal` option, native — NOT
+  node-pty, which EOFs interactive shells under Bun); spawned lazily in the
+  session cwd on `term_open`, streamed as `term_out` broadcasts, 200KB replay
+  buffer; frontend is xterm.js embedded from node_modules (`/xterm.js` etc.),
+  drawer above the input bar, ctrl+` toggles, esc inside stays in the shell.
   `clilink.ts`: the TUI dials ws://127.0.0.1:4242/cli (10s silent retry), registers
   with a transcript snapshot, mirrors all bridge events and accepts remote commands
   (prompt/mode/interrupt/answer); the server's /cli endpoint stores CliSession state

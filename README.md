@@ -1,25 +1,38 @@
 # GRAYSKULL
 
-**BY THE POWER OF GRAYSKULL** — a Claude Code-style terminal agent for local vLLM models
-on a DGX Spark. Defaults to **Qwen3.6-35B-A3B** (`:8002`); switch live with `/model` to
-Qwen3.5-122B-heretic (`:8000`) or GLM-4.5-Air (`:8001`) — one model loads at a time on
-the 119 GiB box.
+**BY THE POWER OF GRAYSKULL** — a Claude Code-style terminal agent for **local models,
+plural**. Anything that speaks the OpenAI chat API is a first-class citizen: vLLM,
+llama.cpp, LM Studio, Ollama, a box across the VPN — all of them side by side. Models
+live in a named preset registry (endpoint + family + sampling + context window):
+`/model` swaps the whole stack live mid-session, `/setup` adds and edits presets from
+a dialog, and thinking chains can pin a *different model per step* — plan on the big
+slow one, grind out code on the fast one, gate the review on whichever you trust most.
 
-The model is not frontier-smart, so the harness does extra lifting: persistent two-tier
-memory with brain-like scoring, ask-back interviews, tool-call repair, mandatory web
-verification, stuck-detection with auto web-research, sub-agent fan-out, user-composable
-thinking chains, image input (pasted *and* from tool results — the agent sees its own
-Playwright screenshots), scheduled unattended workers, live model switching, a
-matrix-style web UI with zen mode, and aggressive context hygiene.
+Ships with presets for a DGX Spark stack (Qwen3.6-35B, Qwen3.5-122B-heretic,
+GLM-4.5-Air, small Llama/Nemotron utility models) — keep them, edit them, or point
+your own; nothing is hardwired. Model-family profiles (qwen / glm) absorb the dialect
+quirks per model: tool-call leak formats, thinking-mode kwargs, chain sampling presets.
+
+Local models are not frontier-smart, so the harness does extra lifting: persistent
+two-tier memory with brain-like scoring, ask-back interviews, tool-call repair,
+mandatory web verification, stuck-detection with auto web-research, plan-first
+blueprint gating, sub-agent fan-out, user-composable thinking chains, image input
+(pasted *and* from tool results — the agent sees its own Playwright screenshots),
+scheduled unattended workers, a per-session shell in the web UI, a matrix-style web
+UI with zen mode, and aggressive context hygiene.
 
 ## What makes GRAYSKULL different
 
 Most agent CLIs are thin wrappers around a frontier model — the model is smart, the
-harness stays out of the way. GRAYSKULL is the opposite bet: **a mid-size local model
-plus a harness that compensates mechanically.** Everything below exists because a
-35B–122B model running on your own box needs it — and it's yours, on your hardware,
+harness stays out of the way. GRAYSKULL is the opposite bet: **mid-size local models
+plus a harness that compensates mechanically.** Everything below exists because an
+8B–122B model running on your own hardware needs it — and it's yours, on your box,
 with zero cloud dependency:
 
+- **Multi-model by design.** A preset registry instead of one hardcoded endpoint:
+  mix vLLM, llama.cpp, LM Studio, Ollama across machines, switch live with `/model`,
+  and let a thinking chain use a different model per step. Family profiles keep each
+  model's dialect quirks (tool-call leaks, thinking kwargs) out of your way.
 - **Memory that behaves like memory.** Two tiers (global vault + per-project),
   auto-distilled after every turn, scored with ACT-R-style activation: memories decay
   exponentially, get reinforced when they fire, spread activation to similar neighbors,
@@ -30,9 +43,9 @@ with zero cloud dependency:
   GRAYSKULL breaks the loop mechanically.
 - **Thinking chains — structured reasoning you compose.** `/thinkingchain plan -> code
   -> review` runs user-defined step pipelines with PASS/FAIL gates that jump back on
-  failure, per-step sampling presets (creative planning, precise coding), shared or
-  fresh context per step. A weak model following a good process beats a weak model
-  winging it.
+  failure, per-step sampling presets (creative planning, precise coding), per-step
+  model binding, shared or fresh context per step. A weak model following a good
+  process beats a weak model winging it.
 - **It sees its own screenshots.** Playwright screenshots come back as real images to
   the vision model — the agent looks at the rendered page, not just the DOM.
 - **Compilers as guardrails.** Every edit triggers the project's typecheck; failures are
