@@ -947,7 +947,7 @@ function mem3dCoords(h) {
 }
 function bdFrame() {
   const c = bd.canvas, ctx = bd.ctx;
-  if (!c) return;
+  if (!c || document.hidden) return;
   bd.t++;
   const theme = document.documentElement.dataset.theme;
   const acc = cssVar("--g") || "#00ff66";
@@ -984,67 +984,12 @@ function bdFrame() {
       ctx.fillRect(s.x * W, s.y * H, s.z > 0.8 ? 2 : 1, s.z > 0.8 ? 2 : 1);
     }
   }
-  // ── memory constellation (all themes): global vault + hot local memories ──
+  // ── memory ocean: ZEN ONLY. The old always-on 2D constellation cost real
+  // CPU behind the UI (O(n²) link pass + a radial gradient per node, every
+  // tick) — outside zen the backdrop is cheap ambience (rain / grid+stars).
   if (bd.mem.length && zenMode) {
-    // zen: rotatable 3D cloud — drag to spin, wheel to zoom, idles slowly
+    // rotatable 3D cloud — drag to spin, wheel to zoom, idles slowly
     bdFrame3d(ctx, W, H, cssVar("--amber") || "#ffaa00", acc, cyan);
-  } else if (bd.mem.length) {
-    // zen mode: the GUI is gone, the ocean is the show — bigger, brighter
-    const zen = false;
-    const boost = zen ? 2.2 : 1;
-    const alpha = (a) => Math.min(1, a * boost);
-    // global vault entries are beacons: amber, so they never drown in the
-    // rain (--g) or among the cyan local nodes
-    const gold = cssVar("--amber") || "#ffaa00";
-    ctx.font = zen ? "12px monospace" : "9px monospace";
-    // faint links between neighbouring constellation nodes
-    ctx.lineWidth = 1;
-    for (let i = 0; i < bd.mem.length; i++) {
-      const a = bd.mem[i];
-      a.x = (a.x + a.dx + 1) % 1; a.y = (a.y + a.dy + 1) % 1;
-      for (let j = i + 1; j < bd.mem.length; j++) {
-        const b = bd.mem[j];
-        const dx = (a.x - b.x) * W, dy = (a.y - b.y) * H;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < 26000) {
-          const lcol = a.kind === "global" || b.kind === "global" ? gold : a.hot || b.hot ? cyan : acc;
-          ctx.strokeStyle = hexA(lcol, alpha(0.10) * (1 - d2 / 26000));
-          ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
-        }
-      }
-    }
-    for (const n of bd.mem) {
-      const x = n.x * W, y = n.y * H;
-      const col = n.kind === "global" ? gold : cyan;
-      if (n.kind === "global") {
-        // always-lit beacon with a slow pulse halo and readable label
-        const pulse = 0.6 + 0.4 * Math.sin(bd.t * 0.03 + hash32(n.text) % 7);
-        const rr = (zen ? 22 : 13) * pulse;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
-        g.addColorStop(0, hexA(col, zen ? 0.35 : 0.22)); g.addColorStop(1, hexA(col, 0));
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, 0.95);
-        ctx.beginPath(); ctx.arc(x, y, zen ? 3.4 : 2.6, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, zen ? 0.9 : 0.5);
-        ctx.fillText(n.text.slice(0, zen ? 70 : 34), x + 7, y - 6);
-        continue;
-      }
-      if (n.hot) {
-        const pulse = 0.5 + 0.5 * Math.sin(bd.t * 0.08 + hash32(n.text) % 7);
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 16 * boost);
-        g.addColorStop(0, hexA(col, 0.35 * pulse)); g.addColorStop(1, hexA(col, 0));
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 16 * boost, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, 0.9);
-        ctx.beginPath(); ctx.arc(x, y, zen ? 3.2 : 2.4, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, alpha(0.55));
-        ctx.fillText(n.text.slice(0, zen ? 60 : 34), x + 6, y - 5);
-      } else {
-        ctx.fillStyle = hexA(col, alpha(n.kind === "global" ? 0.4 : 0.3));
-        ctx.beginPath(); ctx.arc(x, y, zen ? 2.2 : 1.7, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = hexA(col, alpha(0.16));
-        ctx.fillText(n.text.slice(0, zen ? 48 : 26), x + 5, y - 4);
-      }
-    }
   }
 }
 
@@ -2290,7 +2235,13 @@ function renderMemory() {
    edges = lexical similarity. drag to spin, click for detail. */
 const SECT_COLORS = ["#33ff88", "#00ddff", "#ffaa00", "#cc88ff", "#ff4466"];
 const mem3 = { ctx: null, canvas: null, nodes: [], links: [], sections: [], sig: "",
-  yaw: 0, pitch: -0.3, vyaw: 0.0035, drag: false, moved: 0, lx: 0, ly: 0, proj: [] };
+  yaw: 0, pitch: -0.3, drag: false, moved: 0, lx: 0, ly: 0, proj: [], raf: null };
+/** Demand-driven rendering: the graph redraws on data change / drag / resize /
+ *  tab switch instead of a free-running 60fps rAF loop (real CPU cost on a
+ *  panel that is static 99% of the time). No idle auto-spin — drag rotates. */
+function mem3Request() {
+  if (!mem3.raf) mem3.raf = requestAnimationFrame(() => { mem3.raf = null; mem3Frame(); });
+}
 function fibSphere(i, n) {
   const y = n <= 1 ? 0 : 1 - (i / (n - 1)) * 2;
   const r = Math.sqrt(Math.max(0, 1 - y * y));
@@ -2320,10 +2271,15 @@ function mem3Layout(graph) {
 }
 function mem3Update(graph) {
   if (!mem3.ctx) mem3Init();
-  if (!graph || !graph.nodes?.length) { mem3.nodes = []; mem3.sig = ""; $("memLegend").textContent = ""; return; }
+  if (!graph || !graph.nodes?.length) {
+    mem3.nodes = []; mem3.sig = ""; $("memLegend").textContent = "";
+    mem3.ctx?.clearRect(0, 0, mem3.canvas.width, mem3.canvas.height);
+    return;
+  }
   const sig = graph.nodes.length + ":" + graph.nodes.map((n) => n.id).join(",");
   if (sig !== mem3.sig) { mem3.sig = sig; mem3Layout(graph); }
   $("memLegend").textContent = "size = activation · drag to spin · click a node";
+  mem3Request();
 }
 function mem3Init() {
   const c = $("memCanvas"); mem3.canvas = c; mem3.ctx = c.getContext("2d");
@@ -2333,9 +2289,11 @@ function mem3Init() {
     const dx = e.clientX - mem3.lx, dy = e.clientY - mem3.ly;
     mem3.lx = e.clientX; mem3.ly = e.clientY; mem3.moved += Math.abs(dx) + Math.abs(dy);
     mem3.yaw += dx * 0.01; mem3.pitch = Math.max(-1.3, Math.min(1.3, mem3.pitch + dy * 0.01));
+    mem3Request();
   });
   c.addEventListener("pointerup", (e) => { mem3.drag = false; if (mem3.moved < 5) mem3Click(e); });
-  requestAnimationFrame(mem3Frame);
+  addEventListener("resize", mem3Request);
+  mem3Request();
 }
 function mem3Click(e) {
   const r = mem3.canvas.getBoundingClientRect();
@@ -2345,7 +2303,6 @@ function mem3Click(e) {
   if (best) openMemNode(best);
 }
 function mem3Frame() {
-  requestAnimationFrame(mem3Frame);
   const c = mem3.canvas;
   if (memView !== "graph" || !c || c.offsetParent === null || !mem3.nodes.length) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -2353,7 +2310,6 @@ function mem3Frame() {
   if (!W || !H) return;
   if (c.width !== (W * dpr | 0) || c.height !== (H * dpr | 0)) { c.width = W * dpr | 0; c.height = H * dpr | 0; }
   const ctx = mem3.ctx; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
-  if (!mem3.drag) mem3.yaw += mem3.vyaw;
   const cyw = Math.cos(mem3.yaw), syw = Math.sin(mem3.yaw), cp = Math.cos(mem3.pitch), sp = Math.sin(mem3.pitch);
   const D = 3.0, focal = Math.min(W, H) * 0.95, cx = W / 2, ccy = H / 2;
   const proj = [];
