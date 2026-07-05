@@ -367,30 +367,94 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 .pal-row .pk { color: var(--g); flex: 0 0 70px; }
 .pal-row.sel, .pal-row:hover { background: var(--sel); color: var(--fg); }
 
-/* ── chain editor ── */
-.cseHdr { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.cseHdr input, .cseHdr select, .cseRow input, .cseRow select {
-  background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
-  padding: 4px 6px; font-family: inherit; font-size: 11px; outline: none; }
-.cseLegend { color: var(--g-dim); font-size: 10px; margin-bottom: 6px; letter-spacing: .5px; }
-.cseRow { display: flex; gap: 4px; align-items: center; margin-bottom: 5px; }
-.cseRow .step { flex: 1; min-width: 80px; }
-.cseRow .temp { flex: 0 0 58px; width: 58px; }
-.cseRow .mini { background: var(--input-bg); color: var(--g); border: 1px solid var(--g-dim);
-  cursor: pointer; padding: 3px 7px; font-family: inherit; }
-.cseRow .mini:hover { border-color: var(--g); }
-.cseCard { border: 1px solid var(--g-faint); padding: 6px; margin-bottom: 7px; }
-.cseSkills { display: flex; gap: 12px; margin-top: 5px; }
-.cseSkills label { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--g-dim); font-size: 10px; }
+/* ── chain editor — pipeline rail ── */
+#chainModal h3 { display: flex; align-items: center; gap: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--g) 8%, transparent), transparent); }
+.cseHdr { display: grid; grid-template-columns: 200px 1fr auto; gap: 8px; margin-bottom: 10px; }
+.cseHdr input { background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
+  padding: 7px 9px; font-family: inherit; font-size: 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.cseHdr input:focus { border-color: var(--g); box-shadow: 0 0 8px color-mix(in srgb, var(--g) 35%, transparent); }
+/* context: segmented toggle */
+.cseCtx { display: flex; border: 1px solid var(--g-dim); }
+.cseCtx button { background: var(--input-bg); color: var(--g-dim); border: none; cursor: pointer;
+  font-family: inherit; font-size: 10px; letter-spacing: 1px; padding: 0 12px; transition: all .15s; }
+.cseCtx button + button { border-left: 1px solid var(--g-dim); }
+.cseCtx button.on { background: color-mix(in srgb, var(--g) 14%, var(--input-bg)); color: var(--g);
+  text-shadow: 0 0 6px var(--g); }
+/* live pipeline preview */
+.csePrev { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 8px 10px;
+  border: 1px dashed var(--g-faint); margin-bottom: 12px; min-height: 20px;
+  background: color-mix(in srgb, var(--g) 3%, transparent); }
+.csePrev .pv { font-size: 10px; letter-spacing: .5px; color: var(--g-dim); border: 1px solid var(--g-faint);
+  padding: 2px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csePrev .pv.gate { color: var(--amber); border-color: var(--amber); border-style: dashed; }
+.csePrev .pv-arrow { color: var(--g-faint); font-size: 10px; }
+.csePrev .pv-empty { color: var(--g-faint); font-size: 10px; letter-spacing: 1px; }
+/* rail + step cards */
+#cseRows { position: relative; padding-left: 34px; }
+#cseRows::before { content: ""; position: absolute; left: 13px; top: 10px; bottom: 10px; width: 2px;
+  background: linear-gradient(180deg, var(--g-dim), var(--g-faint)); box-shadow: 0 0 6px var(--glow); }
+.cseCard { position: relative; border: 1px solid var(--g-faint); background: color-mix(in srgb, var(--g) 3%, transparent);
+  padding: 9px 10px; margin-bottom: 10px; transition: border-color .15s, box-shadow .15s; animation: cseIn .18s ease-out; }
+@keyframes cseIn { from { opacity: 0; transform: translateY(-4px); } }
+.cseCard:hover { border-color: var(--g-dim); }
+.cseCard:focus-within { border-color: var(--g); box-shadow: 0 0 12px color-mix(in srgb, var(--g) 20%, transparent); }
+.cseCard::before { /* rail node */ content: attr(data-n); position: absolute; left: -34px; top: 10px;
+  width: 22px; height: 22px; line-height: 20px; text-align: center; font-size: 10px; box-sizing: border-box;
+  color: var(--g); border: 1px solid var(--g-dim); background: var(--modal-bg); border-radius: 50%;
+  box-shadow: 0 0 8px var(--glow); }
+.cseCard.gated { border-color: color-mix(in srgb, var(--amber) 55%, var(--g-faint)); }
+.cseCard.gated::before { content: "◆"; color: var(--amber); border-color: var(--amber);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 45%, transparent); }
+.cseCard.gated::after { content: "GATE · VERDICT PASS/FAIL"; position: absolute; right: 8px; top: -7px;
+  font-size: 8px; letter-spacing: 1px; color: var(--amber); background: var(--modal-bg); padding: 0 5px; }
+.cseRow { display: flex; gap: 6px; align-items: center; }
+.cseRow .step { flex: 1; min-width: 80px; background: transparent; color: var(--fg);
+  border: none; border-bottom: 1px solid var(--g-faint); padding: 4px 2px; font-family: inherit;
+  font-size: 12.5px; outline: none; transition: border-color .15s; }
+.cseRow .step:focus { border-bottom-color: var(--g); }
+.cseRow .step::placeholder { color: var(--g-faint); }
+.cseRow .mini { background: transparent; color: var(--g-dim); border: 1px solid transparent;
+  cursor: pointer; padding: 3px 7px; font-family: inherit; font-size: 11px; transition: all .15s; }
+.cseRow .mini:hover { color: var(--g); border-color: var(--g-dim); }
+.cseRow .mini.del:hover { color: var(--red); border-color: var(--red); }
+/* knob strip: labeled compact controls */
+.cseKnobs { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; align-items: flex-end; }
+.cseKnob { display: flex; flex-direction: column; gap: 2px; }
+.cseKnob > span { font-size: 8.5px; letter-spacing: 1px; color: var(--g-dim); text-transform: uppercase; }
+.cseKnob select, .cseKnob input { background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-faint);
+  padding: 3px 6px; font-family: inherit; font-size: 11px; outline: none; transition: border-color .15s; }
+.cseKnob select:hover, .cseKnob select:focus, .cseKnob input:focus { border-color: var(--g-dim); }
+.cseKnob .temp { width: 58px; }
+.cseChk { display: flex; align-items: center; gap: 5px; color: var(--g-dim); font-size: 11px;
+  white-space: nowrap; cursor: pointer; padding-bottom: 4px; }
+.cseChk input { accent-color: var(--g); }
+/* advanced disclosure */
+.cseAdv { margin-top: 8px; border-top: 1px dashed var(--g-faint); }
+.cseAdv summary { cursor: pointer; list-style: none; font-size: 9px; letter-spacing: 1.5px;
+  color: var(--g-dim); padding: 6px 0 2px; user-select: none; transition: color .15s; }
+.cseAdv summary::-webkit-details-marker { display: none; }
+.cseAdv summary:hover { color: var(--g); }
+.cseAdv summary::before { content: "▸ "; }
+.cseAdv[open] summary::before { content: "▾ "; }
+.cseAdvBody { display: flex; gap: 12px; margin-top: 5px; flex-wrap: wrap; }
+.cseAdvBody label { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 140px;
+  color: var(--g-dim); font-size: 10px; }
 .cseSkLbl { display: flex; align-items: center; gap: 5px; }
 .cseClr { color: var(--red); cursor: pointer; text-decoration: underline; }
 .cseHint { color: var(--g-faint); margin-left: auto; }
-.cseMcp { display: flex; gap: 12px; margin-top: 6px; align-items: flex-start; }
-.cseChk { display: flex; align-items: center; gap: 5px; color: var(--fg); font-size: 11px; white-space: nowrap; }
-.cseMcpOnly { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--g-dim); font-size: 10px; }
-.cseMcpOnly select[multiple], .cseSkills select[multiple] { background: var(--input-bg); color: var(--fg);
-  border: 1px solid var(--g-dim); font-family: inherit; font-size: 11px; outline: none; }
-.cseMcpOnly option:checked, .cseSkills option:checked { background: var(--g-faint); color: var(--fg); }
+.cseAdvBody select[multiple] { background: var(--input-bg); color: var(--fg);
+  border: 1px solid var(--g-faint); font-family: inherit; font-size: 11px; outline: none; }
+.cseAdvBody option:checked { background: var(--g-faint); color: var(--fg); }
+/* add-step docked to the rail */
+#cseAdd { background: transparent; color: var(--g-dim); border: 1px dashed var(--g-dim); cursor: pointer;
+  font-family: inherit; font-size: 11px; letter-spacing: 1px; padding: 7px 14px; width: 100%;
+  transition: all .15s; }
+#cseAdd:hover { color: var(--g); border-color: var(--g); background: color-mix(in srgb, var(--g) 6%, transparent);
+  text-shadow: 0 0 6px var(--g); }
+#cseFoot { font-size: 10px; letter-spacing: 1px; color: var(--g-dim); align-self: center; }
+#cseFoot b { color: var(--g); font-weight: normal; }
+#cseFoot .gd { color: var(--amber); }
 #toast { position: fixed; bottom: 16px; right: 16px; z-index: 200; color: var(--red); display: none;
   border: 1px solid var(--red); background: rgba(20,0,4,.9); padding: 8px 14px; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--g-faint); }
@@ -565,20 +629,24 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   <div id="palList"></div>
 </div></div>
 
-<div class="modal-bg" id="chainModalBg"><div class="modal" style="width:min(880px,94vw)">
+<div class="modal-bg" id="chainModalBg"><div class="modal" id="chainModal" style="width:min(880px,94vw)">
   <h3 id="cseTitle">⛓ EDIT CHAIN</h3>
   <div class="body" id="cseBody" style="white-space:normal">
     <div class="cseHdr">
-      <input id="cseName" placeholder="chain name" style="flex:0 0 170px">
-      <input id="cseDesc" placeholder="description" style="flex:1">
-      <select id="cseContext"><option value="shared">shared ctx</option><option value="fresh">fresh ctx</option></select>
+      <input id="cseName" placeholder="chain name" spellcheck="false">
+      <input id="cseDesc" placeholder="what this pipeline is for…" spellcheck="false">
+      <div class="cseCtx" id="cseCtx" title="shared: steps continue one conversation · fresh: each step starts clean with a handoff brief">
+        <button type="button" data-ctx="shared">SHARED CTX</button><button type="button" data-ctx="fresh">FRESH CTX</button>
+      </div>
+      <input id="cseContext" type="hidden">
     </div>
-    <div class="cseLegend">step · model · thinking · temp · gate — blank = inherit default</div>
+    <div class="csePrev" id="csePrev" title="execution order — ◆ dashed = gate step (VERDICT PASS/FAIL, fail jumps back)"></div>
     <div id="cseRows"></div>
-    <button class="btn" id="cseAdd" style="margin-top:6px">+ add step</button>
+    <button class="btn" id="cseAdd">＋ DOCK A STEP ONTO THE RAIL</button>
     <datalist id="cseBuiltins"></datalist>
   </div>
   <div class="actions">
+    <span id="cseFoot"></span>
     <div style="flex:1"></div>
     <button class="btn" onclick="closeModal('chainModalBg')">CANCEL</button>
     <button class="btn" id="cseSaveBtn">SAVE</button>
@@ -2140,33 +2208,69 @@ function cseMcpOpts(selArr) {
     return `<option value="${esc(n)}"${sel.has(n) ? " selected" : ""}>${esc(label)}</option>`;
   }).join("");
 }
+/** A step counts as a gate when forced on, or auto + review/test/verify in the name
+ *  (mirrors chains/registry isGate) — drives the ◆ rail node + amber card trim. */
+function cseIsGate(r) {
+  if (r.gate === "on") return true;
+  if (r.gate === "off") return false;
+  return /\b(review|test|verify)\b/i.test(r.step || "");
+}
+function csePrevRender() {
+  const ce = S.chainEdit; if (!ce) return;
+  const named = ce.rows.filter((r) => r.step.trim());
+  $("csePrev").innerHTML = named.length
+    ? named.map((r, i) => `${i ? '<span class="pv-arrow">→</span>' : ""}<span class="pv${cseIsGate(r) ? " gate" : ""}" title="${esc(r.step)}">${cseIsGate(r) ? "◆ " : ""}${esc(r.step)}</span>`).join("")
+    : '<span class="pv-empty">EMPTY PIPELINE — dock a step below</span>';
+  const gates = named.filter(cseIsGate).length;
+  $("cseFoot").innerHTML = named.length
+    ? `<b>${named.length}</b> step${named.length === 1 ? "" : "s"}${gates ? ` · <span class="gd">◆ ${gates} gate${gates === 1 ? "" : "s"}</span>` : ""} · ${esc(ce.context)} ctx`
+    : "";
+  $("cseCtx").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.ctx === ce.context));
+}
 function renderChainRows() {
   const ce = S.chainEdit; if (!ce) return;
   const noSkills = !(ce.skills && ce.skills.length);
   const noMcp = !(ce.mcpTools && ce.mcpTools.length);
   $("cseRows").innerHTML = ce.rows.map((r, i) => `
-    <div class="cseCard">
+    <div class="cseCard${cseIsGate(r) ? " gated" : ""}" data-n="${i + 1}">
       <div class="cseRow">
-        <input class="step" list="cseBuiltins" data-i="${i}" data-f="step" value="${esc(r.step)}" placeholder="step">
-        <select data-i="${i}" data-f="model" title="model">${cseModelOpts(r.model)}</select>
-        <select data-i="${i}" data-f="think" title="thinking">${cseTriOpts([["", "think:auto"], ["on", "think:on"], ["off", "think:off"]], r.think)}</select>
-        <input class="temp" type="number" step="0.05" min="0" max="2" data-i="${i}" data-f="temp" value="${esc(r.temp)}" placeholder="temp" title="temperature">
-        <select data-i="${i}" data-f="gate" title="gate">${cseTriOpts([["", "gate:auto"], ["on", "gate:on"], ["off", "gate:off"]], r.gate)}</select>
+        <input class="step" list="cseBuiltins" data-i="${i}" data-f="step" value="${esc(r.step)}" spellcheck="false"
+          placeholder="what should this step do?">
         <button class="mini" onclick="cseMove(${i},-1)" title="move up">↑</button>
         <button class="mini" onclick="cseMove(${i},1)" title="move down">↓</button>
-        <button class="mini" onclick="cseDel(${i})" title="remove">✕</button>
+        <button class="mini del" onclick="cseDel(${i})" title="remove step">✕</button>
       </div>
-      <div class="cseSkills"${noSkills ? ' style="display:none"' : ""}>
-        <label><span class="cseSkLbl">require (${r.require.length})${r.require.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'require')">clear</a>` : ""}<span class="cseHint"> — empty = auto-load</span></span><select multiple size="3" data-i="${i}" data-f="require" title="skills force-loaded for this step; leave empty to auto-load relevant ones">${cseSkillOpts(r.require)}</select></label>
-        <label><span class="cseSkLbl">forbid (${r.forbid.length})${r.forbid.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'forbid')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="forbid" title="skills blocked from auto-load and the skill tool this step">${cseSkillOpts(r.forbid)}</select></label>
+      <div class="cseKnobs">
+        <label class="cseKnob"><span>model</span><select data-i="${i}" data-f="model">${cseModelOpts(r.model)}</select></label>
+        <label class="cseKnob"><span>thinking</span><select data-i="${i}" data-f="think">${cseTriOpts([["", "auto"], ["on", "on"], ["off", "off"]], r.think)}</select></label>
+        <label class="cseKnob"><span>temp</span><input class="temp" type="number" step="0.05" min="0" max="2" data-i="${i}" data-f="temp" value="${esc(r.temp)}" placeholder="inherit"></label>
+        <label class="cseKnob" title="gate steps must end with VERDICT PASS or FAIL — a FAIL jumps the chain back"><span>gate</span><select data-i="${i}" data-f="gate">${cseTriOpts([["", "auto"], ["on", "on"], ["off", "off"]], r.gate)}</select></label>
+        <label class="cseKnob" title="inherit = spawn tools available · fan-out = nudge the step to delegate · off = remove spawn tools"><span>sub-agents</span><select data-i="${i}" data-f="subagents">${cseTriOpts([["", "inherit"], ["on", "fan-out"], ["off", "off"]], r.subagents)}</select></label>
+        <label class="cseChk" title="give this step the connected MCP tool servers"><input type="checkbox" data-i="${i}" data-f="mcp" ${r.mcp ? "checked" : ""}> MCP</label>
       </div>
-      <div class="cseMcp">
-        <select data-i="${i}" data-f="subagents" title="sub-agents: inherit = spawn tools available; fan-out = nudge the step to spawn sub-agents; off = remove the spawn tools">${cseTriOpts([["", "agents:inherit"], ["on", "agents:fan-out"], ["off", "agents:off"]], r.subagents)}</select>
-        <label class="cseChk"><input type="checkbox" data-i="${i}" data-f="mcp" ${r.mcp ? "checked" : ""}> MCP tools</label>
-        ${noMcp ? "" : `<label class="cseMcpOnly"><span class="cseSkLbl">only (${r.mcptools.length}, empty = all)${r.mcptools.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'mcptools')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="mcptools" title="restrict this step to these MCP tools (requires the checkbox on)">${cseMcpOpts(r.mcptools)}</select></label>`}
-      </div>
+      ${noSkills && noMcp ? "" : `<details class="cseAdv"${r._adv ? " open" : ""} ontoggle="cseAdvToggle(${i},this.open)"><summary>SKILLS &amp; TOOL SCOPE</summary>
+      <div class="cseAdvBody">
+        ${noSkills ? "" : `<label><span class="cseSkLbl">require skills (${r.require.length})${r.require.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'require')">clear</a>` : ""}<span class="cseHint">empty = auto-load</span></span><select multiple size="3" data-i="${i}" data-f="require" title="skills force-loaded for this step; leave empty to auto-load relevant ones">${cseSkillOpts(r.require)}</select></label>
+        <label><span class="cseSkLbl">forbid skills (${r.forbid.length})${r.forbid.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'forbid')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="forbid" title="skills blocked from auto-load and the skill tool this step">${cseSkillOpts(r.forbid)}</select></label>`}
+        ${noMcp ? "" : `<label><span class="cseSkLbl">mcp only (${r.mcptools.length}${r.mcptools.length ? "" : ", empty = all"})${r.mcptools.length ? ` <a class="cseClr" onclick="cseClearSkills(${i},'mcptools')">clear</a>` : ""}</span><select multiple size="3" data-i="${i}" data-f="mcptools" title="restrict this step to these MCP tools (requires MCP on)">${cseMcpOpts(r.mcptools)}</select></label>`}
+      </div></details>`}
     </div>`).join("");
+  csePrevRender();
 }
+function cseAdvToggle(i, open) { if (S.chainEdit?.rows[i]) S.chainEdit.rows[i]._adv = open; }
+// live refresh of preview/footer/gate-trim while typing — no row re-render, focus survives
+$("cseRows").addEventListener("input", (e) => {
+  cseSync(); csePrevRender();
+  const i = e.target?.dataset?.i;
+  if (i !== undefined && S.chainEdit?.rows[+i] !== undefined) {
+    const card = e.target.closest(".cseCard");
+    if (card) card.classList.toggle("gated", cseIsGate(S.chainEdit.rows[+i]));
+  }
+});
+$("cseCtx").addEventListener("click", (e) => {
+  const ctx = e.target?.dataset?.ctx; if (!ctx || !S.chainEdit) return;
+  S.chainEdit.context = ctx; $("cseContext").value = ctx; csePrevRender();
+});
 function cseSync() {
   const ce = S.chainEdit; if (!ce) return;
   ce.name = $("cseName").value; ce.description = $("cseDesc").value; ce.context = $("cseContext").value;
