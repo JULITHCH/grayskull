@@ -5,6 +5,11 @@ declare module "*.mp3" {
   export default path;
 }
 
+declare module "*.png" {
+  const path: string;
+  export default path;
+}
+
 // `with { type: "text" }` imports embed the file content as a string; the
 // xterm dist js/css are imported this way to serve them CDN-free.
 declare module "*/xterm/lib/xterm.js" {

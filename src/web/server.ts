@@ -7,6 +7,9 @@ import zenMp3Path from "./zen.mp3" with { type: "file" };
 import xtermJsRaw from "../../node_modules/@xterm/xterm/lib/xterm.js" with { type: "text" };
 import xtermCssRaw from "../../node_modules/@xterm/xterm/css/xterm.css" with { type: "text" };
 import xtermFitRaw from "../../node_modules/@xterm/addon-fit/lib/addon-fit.js" with { type: "text" };
+// PWA assets: installable app + notification icon
+import icon192Path from "./icon-192.png" with { type: "file" };
+import icon512Path from "./icon-512.png" with { type: "file" };
 import { SessionManager } from "./session";
 import { TermManager } from "./term";
 import { ensureGlobalSystemPrompt, loadSettings } from "../config/settings";
@@ -22,6 +25,37 @@ import { LlmClient } from "../llm/client";
 import type { TranscriptItem } from "../types";
 
 const indexHtml = indexHtmlRaw as unknown as string;
+
+/** PWA manifest — installable standalone app (requires a secure context:
+ *  localhost, an ssh port-forward, or https). */
+const MANIFEST = JSON.stringify({
+  name: "GRAYSKULL // WEB",
+  short_name: "GRAYSKULL",
+  description: "Control room for the GRAYSKULL local-model coding agent",
+  start_url: "/",
+  display: "standalone",
+  background_color: "#010701",
+  theme_color: "#010701",
+  icons: [
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+  ],
+});
+
+/** Minimal service worker: no offline caching (the UI is one live-WS page —
+ *  a stale cached shell is worse than none), just installability plus
+ *  notification click-to-focus. */
+const SW_JS = `
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) => {
+    const c = cs.find((w) => "focus" in w);
+    return c ? c.focus() : self.clients.openWindow("/");
+  }));
+});
+`;
 
 interface WsData {
   id: number;
@@ -331,6 +365,14 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         return new Response(xtermFitRaw as unknown as string, { headers: { "content-type": "text/javascript" } });
       if (url.pathname === "/xterm.css")
         return new Response(xtermCssRaw as unknown as string, { headers: { "content-type": "text/css" } });
+      if (url.pathname === "/manifest.json")
+        return new Response(MANIFEST, { headers: { "content-type": "application/manifest+json" } });
+      if (url.pathname === "/sw.js")
+        return new Response(SW_JS, { headers: { "content-type": "text/javascript" } });
+      if (url.pathname === "/icon-192.png")
+        return new Response(Bun.file(icon192Path), { headers: { "content-type": "image/png" } });
+      if (url.pathname === "/icon-512.png")
+        return new Response(Bun.file(icon512Path), { headers: { "content-type": "image/png" } });
       return new Response(indexHtml, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });

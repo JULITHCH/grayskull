@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GRAYSKULL // WEB</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#010701">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="/xterm.css">
 <script src="/xterm.js"></script>
 <script src="/xterm-fit.js"></script>
@@ -537,6 +541,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     <div class="chip" id="legendChip" style="display:none;color:var(--amber);border-color:var(--amber)">★ legendary</div>
     <div class="chip" id="kamiChip" style="display:none">⚠ KAMIKAZEEE</div>
     <div style="flex:1"></div>
+    <div class="chip" id="notifBtn" title="desktop notifications when grayskull asks something back (needs localhost or https)">🔕</div>
     <div class="chip" id="zenBtn" title="hide the UI — watch the memory ocean (ctrl+.)">◱ ZEN</div>
     <div class="chip" id="paletteBtn" title="command palette (ctrl+k)">⌘K</div>
     <select id="themeSel" title="theme">
@@ -1138,8 +1143,8 @@ function handle(m) {
     case "job_log": openJobLogModal(m.name, m.text); break;
     case "job_note": jlogAppend(m.job, m.text); break;
     case "agent": agentEvent(m.sid, m.ev); break;
-    case "perm_req": S.pendingPerm = m; showPerm(); break;
-    case "ask_req": S.pendingAsk = m; showAsk(); break;
+    case "perm_req": S.pendingPerm = m; showPerm(); gsNotify("GRAYSKULL — permission", m.detail, "gs-perm-" + m.reqId); break;
+    case "ask_req": S.pendingAsk = m; showAsk(); gsNotify("GRAYSKULL asks", m.question, "gs-ask-" + m.reqId); break;
     case "perm_done": if (S.pendingPerm?.reqId === m.reqId) { S.pendingPerm = null; closeModal("permModalBg"); } break;
     case "ask_done": if (S.pendingAsk?.reqId === m.reqId) { S.pendingAsk = null; closeModal("askModalBg"); } break;
     case "setup_data":
@@ -1807,6 +1812,44 @@ function termDispose(sid) {
   t.host.remove();
 }
 $("termBtn").onclick = () => termToggle();
+
+/* ═══════════ PWA + ask-back notifications ═══════════
+ * SW gives installability + notification click-to-focus. Notifications fire
+ * when grayskull asks something back (permission request / ask_user) and the
+ * tab is not being watched. Secure-context only (localhost / https) — on a
+ * plain LAN http origin the bell explains instead of breaking. */
+if ("serviceWorker" in navigator && (isSecureContext || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+function notifSupported() { return isSecureContext && "Notification" in window; }
+function notifOn() { return notifSupported() && Notification.permission === "granted" && localStorage.gsNotify === "on"; }
+function notifRender() {
+  const b = $("notifBtn");
+  b.textContent = notifOn() ? "🔔" : "🔕";
+  b.style.opacity = notifOn() ? "1" : ".6";
+}
+$("notifBtn").onclick = async () => {
+  if (!notifSupported()) {
+    alert("Notifications need a secure context.\nOpen via localhost (e.g. ssh -L 4242:host:4242) or https — plain http on a LAN IP is blocked by the browser.");
+    return;
+  }
+  if (notifOn()) { localStorage.gsNotify = "off"; }
+  else {
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") localStorage.gsNotify = "on";
+  }
+  notifRender();
+};
+notifRender();
+/** Notify unless the user is actively looking at the page. */
+function gsNotify(title, body, tag) {
+  if (!notifOn()) return;
+  if (document.visibilityState === "visible" && document.hasFocus()) return;
+  const opts = { body: (body || "").slice(0, 160), tag, icon: "/icon-192.png", badge: "/icon-192.png" };
+  navigator.serviceWorker?.getRegistration()
+    .then((r) => (r ? r.showNotification(title, opts) : new Notification(title, opts)))
+    .catch(() => { try { new Notification(title, opts); } catch {} });
+}
 $("termRestart").onclick = () => {
   const sid = S.current;
   if (!sid || !TERMS[sid]) return;

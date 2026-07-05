@@ -583,6 +583,12 @@ WebSockets, zero frontend build). This is the recommended way to drive GRAYSKULL
   completed tool step snaps it in, seven steps seal a core and the next begins.
   Watch it work from across the room. esc returns.
 - digital rain + CRT scanlines, session replay on reconnect, esc interrupts
+- **installable PWA + ask-back notifications** — install it as a standalone app
+  (manifest + service worker), and the 🔔 chip enables desktop notifications
+  whenever grayskull asks something back (permission prompt or a question) while
+  you're not looking at the tab; clicking the notification focuses the app. Both
+  need a secure context: open via `localhost` (e.g. `ssh -L 4242:host:4242`) or
+  https — plain `http://<lan-ip>` is blocked by the browser, the bell explains this.
 
 **CLI sessions join the hub.** Every terminal `grayskull` automatically connects to a
 running grayskull-web (retrying quietly in the background, `⇄ web` in the statusline
