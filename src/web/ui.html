@@ -138,7 +138,7 @@ body.zen #zenCube { display: block; }
 
 /* ── sci-fi panel chrome: corner brackets ── */
 .panel { position: relative; border: 1px solid var(--g-faint); background: var(--panel);
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
   box-shadow: inset 0 0 30px var(--sel); backdrop-filter: blur(2px); }
 .panel::before, .panel::after {
   content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none; z-index: 2;
@@ -203,7 +203,10 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .sess.dorm:hover { opacity: .9; }
 .sess .title { color: var(--fg); }
 
-#main { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
+/* min-width 0: grid/flex items default to min-content width — without this the
+   input bar's intrinsic width (textarea + buttons) forces the whole column wider
+   than a phone viewport and the page overflows sideways */
+#main { grid-row: 2; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #transcript { flex: 1; overflow-y: auto; padding: 10px 14px; }
 /* per-session terminal drawer: real PTY in the project folder */
 #termPanel { display: none; height: 300px; flex: none; flex-direction: column;
@@ -276,7 +279,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .attach .x { cursor: pointer; color: var(--red); font-weight: 700; }
 #inputBar.dragover { box-shadow: inset 0 0 0 2px var(--user); }
 #inputBar { flex: 0 0 auto; border-top: 1px solid var(--g-faint); padding: 8px; display: flex; gap: 8px; align-items: flex-end; position: relative; }
-#promptInput { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
+#promptInput { flex: 1; min-width: 0; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 8px 10px; font-family: inherit; font-size: 13px; outline: none; resize: none;
   min-height: 36px; max-height: 160px; line-height: 1.45; }
 #promptInput:focus { box-shadow: 0 0 10px var(--glow); }
@@ -512,8 +515,9 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 
 /* ── mobile: single panel + top tab bar ──────────────────────── */
 @media (max-width: 900px) {
+  html, body { overflow-x: hidden; } /* hard stop: the page must never scroll sideways */
   body { font-size: 14px; }
-  #app { grid-template-columns: 1fr; grid-template-rows: 40px 42px 1fr; gap: 6px; padding: 6px; }
+  #app { grid-template-columns: 1fr; grid-template-rows: 40px 42px 1fr; gap: 6px; padding: 6px; max-width: 100vw; }
   /* chips must stay reachable — swipe sideways instead of clipping them off */
   header { grid-column: 1; padding: 0 8px; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   header::-webkit-scrollbar { display: none; }
@@ -540,6 +544,10 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   .modeBtn { font-size: 9px; padding: 6px 6px; }
   #statusBar { flex-wrap: wrap; gap: 8px; }
   #promptInput { font-size: 16px; }
+  /* the temp slider doesn't earn its width on a phone — /setup has the knob */
+  #tempCtl { display: none; }
+  #inputBar { padding: 6px; gap: 6px; }
+  #sendBtn, #stopBtn { padding: 9px 10px; flex: 0 0 auto; }
   .modal { width: 96vw; max-height: 90vh; }
   #backdrop { opacity: .5; }
 }
