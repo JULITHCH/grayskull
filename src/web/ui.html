@@ -175,9 +175,10 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
   font-size: 11px; letter-spacing: 1px; color: var(--g-dim); user-select: none; }
 .setupTabs .stab:hover { color: var(--g); }
 .setupTabs .stab.on { color: var(--g); border-color: var(--g); background: var(--sel); text-shadow: 0 0 6px var(--g); }
-.mdRow { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dotted var(--g-faint); font-size: 11px; }
+.mdRow { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dotted var(--g-faint); font-size: 11px; flex-wrap: wrap; }
 .mdRow .ref { color: var(--fg); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mdRow .meta { color: var(--g-dim); white-space: nowrap; }
+.setupGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 
 #sessions { grid-row: 2; }
 #sessionList { overflow-y: auto; flex: 1; }
@@ -513,9 +514,15 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 @media (max-width: 900px) {
   body { font-size: 14px; }
   #app { grid-template-columns: 1fr; grid-template-rows: 40px 42px 1fr; gap: 6px; padding: 6px; }
-  header { grid-column: 1; padding: 0 8px; gap: 8px; overflow: hidden; }
+  /* chips must stay reachable — swipe sideways instead of clipping them off */
+  header { grid-column: 1; padding: 0 8px; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  header::-webkit-scrollbar { display: none; }
   header .logo { font-size: 13px; letter-spacing: 2px; }
-  #modelChip, #clockChip { display: none; }
+  #modelChip, #clockChip, #zenBtn { display: none; }
+  #setupBtn { padding: 4px 10px; } /* bigger tap target */
+  .setupGrid { grid-template-columns: 1fr; }
+  .setupTabs .stab { padding: 6px 10px; }
+  .modal .actions { flex-wrap: wrap; }
   #right { display: contents; }
   .gutter { display: none !important; }
   #sessions, #main, #mesh, #memPanel, #ops, #autoPanel { grid-row: 3; grid-column: 1; display: none; min-height: 0; }
@@ -2512,7 +2519,7 @@ function setupGroupHtml(g) {
       ${esc(g.title)}
       ${g.removable ? `<button class="btn danger" style="font-size:10px;padding:1px 7px" onclick="setupRemovePreset('${escA(g.removable)}')" title="remove (defaults stay gone once saved)">✕ REMOVE</button>` : ""}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px">
+    <div class="setupGrid">
       ${g.fields.map(setupFieldHtml).join("")}
     </div>`;
 }
@@ -2619,8 +2626,12 @@ function mdImport(ref) {
   send({ t: "modelsdev_import", sid: S.current, ref });
 }
 $("setupBtn").onclick = () => {
-  if (!S.current) return toast("open a session first — settings live per session");
-  send({ t: "setup_open", sid: S.current });
+  const s = (S.sessions || []).find((x) => x.sid === S.current);
+  if (!s) return toast("open a session first — settings live per session");
+  if (s.origin === "cli") return toast("terminal session — run /setup there, or pick a web session");
+  // dormant sessions have no live agent to answer setup_open — wake it first
+  if (s.dormant) send({ t: "resume_session", sid: s.sid });
+  send({ t: "setup_open", sid: s.sid });
 };
 
 /* ═══════════ chain editor modal ═══════════ */
