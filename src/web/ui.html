@@ -368,12 +368,23 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 .pal-row.sel, .pal-row:hover { background: var(--sel); color: var(--fg); }
 
 /* ── chain editor — pipeline rail ── */
-#chainModal h3 { display: flex; align-items: center; gap: 8px;
+#chainModal { resize: both; overflow: hidden; min-width: 480px; min-height: 300px;
+  max-width: 96vw; max-height: 92vh; }
+#chainModal h3 { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none;
   background: linear-gradient(180deg, color-mix(in srgb, var(--g) 8%, transparent), transparent); }
-.cseHdr { display: grid; grid-template-columns: 200px 1fr auto; gap: 8px; margin-bottom: 10px; }
-.cseHdr input { background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
+#chainModal h3 #cseTitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modalX { background: transparent; color: var(--g-dim); border: 1px solid transparent; cursor: pointer;
+  font-family: inherit; font-size: 12px; line-height: 1; padding: 3px 7px; transition: all .15s; }
+.modalX:hover { color: var(--red); border-color: var(--red); text-shadow: 0 0 6px var(--red); }
+/* auto-growing single-line → multiline fields */
+textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
+.cseHdr textarea.cseGrow { height: 33px; transition: border-color .15s, box-shadow .15s, height .12s ease-out; }
+.cseHdr { display: grid; grid-template-columns: 200px 1fr auto; gap: 8px; margin-bottom: 10px;
+  align-items: start; }
+.cseHdr input, .cseHdr textarea { background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 7px 9px; font-family: inherit; font-size: 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
-.cseHdr input:focus { border-color: var(--g); box-shadow: 0 0 8px color-mix(in srgb, var(--g) 35%, transparent); }
+.cseHdr input:focus, .cseHdr textarea:focus { border-color: var(--g); box-shadow: 0 0 8px color-mix(in srgb, var(--g) 35%, transparent); }
+.cseHdr .cseCtx { height: 33px; }
 /* context: segmented toggle */
 .cseCtx { display: flex; border: 1px solid var(--g-dim); }
 .cseCtx button { background: var(--input-bg); color: var(--g-dim); border: none; cursor: pointer;
@@ -408,10 +419,10 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
   box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 45%, transparent); }
 .cseCard.gated::after { content: "GATE · VERDICT PASS/FAIL"; position: absolute; right: 8px; top: -7px;
   font-size: 8px; letter-spacing: 1px; color: var(--amber); background: var(--modal-bg); padding: 0 5px; }
-.cseRow { display: flex; gap: 6px; align-items: center; }
+.cseRow { display: flex; gap: 6px; align-items: flex-start; }
 .cseRow .step { flex: 1; min-width: 80px; background: transparent; color: var(--fg);
   border: none; border-bottom: 1px solid var(--g-faint); padding: 4px 2px; font-family: inherit;
-  font-size: 12.5px; outline: none; transition: border-color .15s; }
+  font-size: 12.5px; outline: none; transition: border-color .15s, height .12s ease-out; height: 26px; }
 .cseRow .step:focus { border-bottom-color: var(--g); }
 .cseRow .step::placeholder { color: var(--g-faint); }
 .cseRow .mini { background: transparent; color: var(--g-dim); border: 1px solid transparent;
@@ -630,11 +641,12 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 </div></div>
 
 <div class="modal-bg" id="chainModalBg"><div class="modal" id="chainModal" style="width:min(880px,94vw)">
-  <h3 id="cseTitle">⛓ EDIT CHAIN</h3>
+  <h3 id="cseDrag" title="drag to move"><span id="cseTitle">⛓ EDIT CHAIN</span>
+    <button class="modalX" onclick="closeModal('chainModalBg')" title="close">✕</button></h3>
   <div class="body" id="cseBody" style="white-space:normal">
     <div class="cseHdr">
       <input id="cseName" placeholder="chain name" spellcheck="false">
-      <input id="cseDesc" placeholder="what this pipeline is for…" spellcheck="false">
+      <textarea id="cseDesc" class="cseGrow" rows="1" placeholder="what this pipeline is for…" spellcheck="false"></textarea>
       <div class="cseCtx" id="cseCtx" title="shared: steps continue one conversation · fresh: each step starts clean with a handoff brief">
         <button type="button" data-ctx="shared">SHARED CTX</button><button type="button" data-ctx="fresh">FRESH CTX</button>
       </div>
@@ -2187,6 +2199,7 @@ function openChainEditor(m) {
   $("cseDesc").value = S.chainEdit.description;
   $("cseContext").value = S.chainEdit.context;
   renderChainRows();
+  cseResetLayout();
   $("chainModalBg").classList.add("open");
 }
 function cseModelOpts(sel) {
@@ -2234,8 +2247,8 @@ function renderChainRows() {
   $("cseRows").innerHTML = ce.rows.map((r, i) => `
     <div class="cseCard${cseIsGate(r) ? " gated" : ""}" data-n="${i + 1}">
       <div class="cseRow">
-        <input class="step" list="cseBuiltins" data-i="${i}" data-f="step" value="${esc(r.step)}" spellcheck="false"
-          placeholder="what should this step do?">
+        <textarea class="step cseGrow" rows="1" data-i="${i}" data-f="step" spellcheck="false"
+          placeholder="what should this step do?">${esc(r.step)}</textarea>
         <button class="mini" onclick="cseMove(${i},-1)" title="move up">↑</button>
         <button class="mini" onclick="cseMove(${i},1)" title="move down">↓</button>
         <button class="mini del" onclick="cseDel(${i})" title="remove step">✕</button>
@@ -2271,14 +2284,55 @@ $("cseCtx").addEventListener("click", (e) => {
   const ctx = e.target?.dataset?.ctx; if (!ctx || !S.chainEdit) return;
   S.chainEdit.context = ctx; $("cseContext").value = ctx; csePrevRender();
 });
+/* auto-growing fields: collapsed to one line at rest, expand to fit content on
+ * focus/typing, collapse again on blur — delegated so re-renders keep working */
+function cseGrow(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight + 2, 180) + "px"; }
+for (const [ev, fn] of [
+  ["focusin", (el) => cseGrow(el)],
+  ["input", (el) => cseGrow(el)],
+  ["focusout", (el) => { el.style.height = ""; el.scrollTop = 0; }],
+]) {
+  $("cseBody").addEventListener(ev, (e) => { if (e.target?.classList?.contains("cseGrow")) fn(e.target); });
+}
+// steps/description are single-line in the chain file — Enter must not insert \n
+$("cseBody").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target?.classList?.contains("cseGrow")) { e.preventDefault(); e.target.blur(); }
+});
+/* movable (drag the title bar) — resize comes from CSS resize:both */
+(() => {
+  const modal = $("chainModal"), bar = $("cseDrag");
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".modalX")) return;
+    const r = modal.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    // switch from flex-centering to fixed so left/top take effect; freeze size
+    modal.style.width = r.width + "px"; modal.style.height = r.height + "px";
+    modal.style.position = "fixed"; modal.style.left = r.left + "px"; modal.style.top = r.top + "px";
+    modal.style.margin = "0";
+    const move = (ev) => {
+      modal.style.left = Math.min(Math.max(ev.clientX - ox, 8 - r.width * 0.8), innerWidth - 40) + "px";
+      modal.style.top = Math.min(Math.max(ev.clientY - oy, 0), innerHeight - 40) + "px";
+    };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+    e.preventDefault();
+  });
+})();
+/** Fresh open → back to the centered default (undo any drag/resize). */
+function cseResetLayout() {
+  const st = $("chainModal").style;
+  st.position = st.left = st.top = st.margin = st.width = st.height = "";
+}
 function cseSync() {
   const ce = S.chainEdit; if (!ce) return;
-  ce.name = $("cseName").value; ce.description = $("cseDesc").value; ce.context = $("cseContext").value;
+  // steps + description live on single lines in the chain file (`->` body /
+  // frontmatter) — fold any pasted newlines into spaces
+  const oneLine = (v) => v.replace(/\s*\n+\s*/g, " ");
+  ce.name = $("cseName").value; ce.description = oneLine($("cseDesc").value); ce.context = $("cseContext").value;
   $("cseRows").querySelectorAll("[data-i]").forEach((el) => {
     const r = ce.rows[+el.dataset.i]; if (!r) return;
     if (el.type === "checkbox") r[el.dataset.f] = el.checked;
     else if (el.multiple) r[el.dataset.f] = [...el.selectedOptions].map((o) => o.value);
-    else r[el.dataset.f] = el.value;
+    else r[el.dataset.f] = el.dataset.f === "step" ? oneLine(el.value) : el.value;
   });
 }
 function cseClearSkills(i, field) { cseSync(); if (S.chainEdit.rows[i]) S.chainEdit.rows[i][field] = []; renderChainRows(); }
