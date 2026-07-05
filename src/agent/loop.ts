@@ -12,6 +12,7 @@ import { runDiagnostics } from "./diagnostics";
 import { autoMatchSkills, autoSkillBlock, loadSkills, type SkillDef } from "../skills/registry";
 import { StuckTracker } from "./stuck";
 import { VisualVerifyGate } from "./visual";
+import { PlanGate } from "./plan";
 import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
 import type { ModelPreset } from "../config/settings";
@@ -71,6 +72,10 @@ export async function runToolLoop(opts: {
    *  returned string is appended as a user message and the loop continues —
    *  used by the visual-verify gate to block unverified "fixed" claims */
   beforeFinal?: () => string | null;
+  /** called before an edit-kind tool executes (detail = describeCall); a
+   *  returned string replaces the execution as the tool result — used by the
+   *  plan-first gate to refuse code-before-blueprint on substantial turns */
+  beforeEdit?: (toolName: string, detail: string) => string | null;
   /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
   maxTurns?: number;
   /** unattended run (kamikazeee): the iteration cap warns instead of stopping —
@@ -209,6 +214,15 @@ export async function runToolLoop(opts: {
       }
       repairCounts.delete(tool.name);
       const args = validated.args;
+      // plan-first gate: refuse code-before-blueprint (before the permission
+      // prompt — never ask the user to approve an edit we won't run)
+      if (tool.kind === "edit" && opts.beforeEdit) {
+        const block = opts.beforeEdit(tool.name, tool.describeCall(args));
+        if (block) {
+          tasks.push({ call, reply: block });
+          continue;
+        }
+      }
       const item: TranscriptItem & { type: "tool" } = {
         type: "tool",
         name: tool.name,
@@ -458,12 +472,15 @@ export class GrayskullAgent {
     this.ui = opts.ui;
     this.stuck = new StuckTracker(opts.settings.stuckResearch);
     this.visual = new VisualVerifyGate(opts.settings.visualVerify);
+    this.plan = new PlanGate(opts.settings.planFirst);
   }
 
   /** stuck detection → auto web-research nudge (see agent/stuck.ts) */
   private stuck: StuckTracker;
   /** blocks unverified "fixed" claims on visual work (see agent/visual.ts) */
   private visual: VisualVerifyGate;
+  /** refuses code-before-blueprint on substantial turns (see agent/plan.ts) */
+  private plan: PlanGate;
 
   stop(): void {
     this.abort?.abort();
@@ -582,6 +599,8 @@ export class GrayskullAgent {
         // proactive verification contract on visual turns — the blocking gate
         // alone only teaches the model AFTER it tried to finish shallowly
         this.visual.systemHint(),
+        // proactive blueprint contract on substantial turns (same philosophy)
+        this.plan.systemHint(),
         `# Environment\n${env}`,
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",
@@ -641,6 +660,9 @@ export class GrayskullAgent {
     this.stuck.notePrompt(userText);
     // visual turn? (image attached or rendering vocabulary) → verify gate arms
     this.visual.notePrompt(userText, images.length > 0);
+    // substantial turn? (creation/restructure vocabulary) → plan-first gate
+    // arms; chain steps are exempt (chains carry their own plan steps)
+    this.plan.notePrompt(this.chainStepActive ? "" : userText);
 
     // explicit-trigger path → global vault
     if (detectGlobalTrigger(userText, this.settings.memory.globalTriggers)) {
@@ -728,6 +750,9 @@ export class GrayskullAgent {
     this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, "chain step");
+    // fresh-context chain steps plan via their own chain steps — a stale armed
+    // gate from a previous interactive turn must not block their edits
+    this.plan.disarm();
     const messages: ChatMessage[] = [
       this.buildSystemMessage(this.autoSkills(directive)),
       { role: "user", content: directive },
@@ -802,6 +827,14 @@ export class GrayskullAgent {
         }
         return block;
       },
+      beforeEdit: (_toolName, detail) => {
+        const block = this.plan.beforeEdit(detail);
+        if (block) {
+          this.ui.pushItem({ type: "note", text: "📐 substantial task, no blueprint → edit refused, plan-first procedure injected" });
+          turnLog.push("plan-first gate fired: code-before-blueprint refused, research→blueprint→review procedure injected");
+        }
+        return block;
+      },
       messages,
       ctx,
       signal,
@@ -816,6 +849,7 @@ export class GrayskullAgent {
         if (item.state === "done") {
           const kind = this.registry.get(item.name)?.kind ?? "";
           this.visual.noteTool(item.name, kind);
+          this.plan.noteTool(item.name, kind, item.detail);
           if (kind === "edit") this.stuck.noteEdit();
           const isWeb = item.name.startsWith("mcp__searxng__");
           const resultSnippet = isWeb ? `\nresult: ${(item.result ?? "").slice(0, 3000)}` : "";

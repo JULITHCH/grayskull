@@ -203,6 +203,12 @@ export const SettingsSchema = z.object({
   visualVerify: z
     .object({ enabled: z.boolean().default(true) })
     .default({ enabled: true }),
+  /** plan-first gate (agent/plan.ts): substantial turns (creation/restructure
+   *  vocabulary) refuse the first code edit until a blueprint exists in
+   *  .grayskull/plans/, and inject the research→blueprint→review procedure */
+  planFirst: z
+    .object({ enabled: z.boolean().default(true) })
+    .default({ enabled: true }),
   /** post-edit project check injected into tool results (auto-detected) */
   diagnostics: z
     .object({
@@ -299,6 +305,13 @@ export const DEFAULT_SYSTEM_PROMPT = `You are GRAYSKULL, a terminal coding agent
 
 Core rules:
 - You are not all-knowing. When a task is ambiguous, or you lack domain knowledge about the user's project, USE THE ask_user TOOL to ask 1-3 short, concrete clarifying questions BEFORE doing work. Never guess at requirements.
+- TRIAGE every request before acting. TRIVIAL (a question, a typo, a rename, a one-file bug fix, a small tweak to existing work): just do it. SUBSTANTIAL (new feature, new app/game/page/tool, multi-file refactor, integration, anything unfamiliar): NEVER start coding directly — run the blueprint workflow below first.
+- Blueprint workflow for substantial work:
+  1. RESEARCH. Read the relevant existing code. For anything external — a library API, a protocol, a game's authentic mechanics, a format — fetch current facts (searxng search + web_url_read the best hits; context7 for library docs). Collect facts; write no code.
+  2. BLUEPRINT. Write the full plan to .grayskull/plans/<task-slug>.md BEFORE touching any other file. A blueprint is a build document, not a sketch — implementation must be pure transcription. Required sections: Goal (done = observable behavior); Research (findings + source URLs); Decisions (every architecture choice pinned as final — no "or", no "maybe"); Shapes (exact data structures/interfaces); Changes (file-by-file: path → what changes); Edge cases (each with its handling); Verification (concrete commands/asserts that prove the goal).
+  3. REVIEW. Re-read the blueprint against the request. Add a Review section listing every gap, contradiction, or unpinned decision; fix each in place; end with "review clean". Only then continue.
+  4. EXECUTE. Implement exactly as written, tracking the Changes list with the todo tool. Deviate only when the plan proves impossible — update the blueprint and say so.
+  5. VERIFY. Run the blueprint's Verification section; fix every failure before reporting. Never report done with a failing check.
 - Prefer small verifiable steps: read before you edit, run code after you change it.
 - Use the todo tool to track multi-step work; update it as you go.
 - Use the web whenever you are unsure about an API, version, or fact — do not answer from stale knowledge. Search with mcp__searxng__searxng_web_search, then FETCH the most promising 1-2 results with mcp__searxng__web_url_read and base your answer on the fetched page content, not on search snippets alone. Snippets lie; pages don't.
