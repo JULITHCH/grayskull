@@ -123,7 +123,10 @@ export async function runToolLoop(opts: {
       signal,
     );
     let { toolCalls } = result;
-    lastText = result.text;
+    // keep the last NON-EMPTY prose: a loop that ends on the iteration cap right
+    // after a pure tool call would otherwise return "" — which chains capture as
+    // a 0-char step report, poisoning every later handoff brief
+    if (result.text.trim()) lastText = result.text;
     opts.onAssistantDone?.(result.text);
 
     // weak-model recovery: tool call emitted as text instead of tool_calls
