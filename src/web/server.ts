@@ -337,6 +337,15 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "setup_preset_remove":
         session?.setupPresetRemove(String(msg["name"] ?? ""));
         break;
+      case "setup_family_add":
+        session?.setupFamilyAdd(String(msg["name"] ?? ""));
+        break;
+      case "modelsdev_search":
+        void session?.modelsdevSearch(String(msg["query"] ?? ""));
+        break;
+      case "modelsdev_import":
+        void session?.modelsdevImport(String(msg["ref"] ?? ""));
+        break;
       case "setup_save":
         session?.setupSave(msg["ids"]);
         break;

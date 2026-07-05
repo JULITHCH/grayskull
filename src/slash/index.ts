@@ -32,6 +32,9 @@ import {
 } from "../chains/registry";
 import { chainState } from "../chains/runner";
 import { loadWorker, deleteWorker, saveWorkerConfig, missingConfig, workerListing } from "../workers/registry";
+import { addFamily, removeFamily, saveGlobal } from "../setup/core";
+import { familyNames, modelProfile } from "../llm/profiles";
+import { searchModelsDev, presetFromEntry } from "../llm/modelsdev";
 import { activeScheduler, setJobEnabled, removeJob, jobListing, JOB_LOG_DIR } from "../scheduler/scheduler";
 import { join } from "node:path";
 import { openInEditor } from "../ui/external";
@@ -234,12 +237,66 @@ export const COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "families",
+    description: "model families (data-driven): list; /families add|remove <name>",
+    run: async (ctx, args) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      if (parts[0] === "add" && parts[1]) {
+        const name = addFamily(ctx.settings, parts[1]);
+        if (!name) return note(ctx, `family name "${parts[1]}" empty or already taken`);
+        saveGlobal(ctx.settings, new Set(["families"]));
+        return note(ctx, `family "${name}" added (cloned from "${ctx.settings.modelFamily}") and saved — tune it in /setup`);
+      }
+      if (parts[0] === "remove" && parts[1]) {
+        if (!removeFamily(ctx.settings, parts[1])) {
+          return note(ctx, `no custom family "${parts[1]}" (built-ins cannot be removed)`);
+        }
+        saveGlobal(ctx.settings, new Set(["families"]));
+        return note(ctx, `family "${parts[1]}" removed and saved`);
+      }
+      const lines = familyNames().map((n) => {
+        const p = modelProfile(n);
+        const custom = n in ctx.settings.families;
+        const active = n === ctx.settings.modelFamily;
+        return `${active ? "●" : "○"} ${n} [${custom ? "custom" : "built-in"}] — dialect ${p.leakDialect}, parsers ${p.toolCallParser || "-"}/${p.reasoningParser || "-"}, codegen temp ${p.presets.codegen.temperature}, reason temp ${p.presets.reason.temperature}`;
+      });
+      note(ctx, `${lines.join("\n")}\n\n/families add <name> clones the active family; edit fields in /setup; built-ins are overridden by a custom family with the same name`);
+    },
+  },
+  {
     name: "model",
-    description: "switch the whole model stack live: /model [name]",
+    description: "switch stack live: /model [name]; /model import <models.dev query>",
     run: async (ctx, args) => {
       const presets = ctx.settings.models;
       const names = Object.keys(presets);
       const want = args.trim();
+      const imp = want.match(/^import\s+(.+)$/);
+      if (imp) {
+        note(ctx, "⌕ querying models.dev…");
+        let hits;
+        try {
+          hits = await searchModelsDev(imp[1]!);
+        } catch (err) {
+          return note(ctx, `models.dev lookup failed: ${(err as Error).message}`);
+        }
+        if (hits.length === 0) return note(ctx, `models.dev: nothing matches "${imp[1]}"`);
+        if (hits.length > 1) {
+          const lines = hits.map(
+            (h) =>
+              `  ${h.ref} — ctx ${h.context ? Math.round(h.context / 1024) + "k" : "?"}, out ${h.output || "?"}${h.toolCall ? ", tools" : ""}${h.reasoning ? ", reasoning" : ""}${h.vision ? ", vision" : ""}${h.openWeights ? ", open" : ""}`,
+          );
+          return note(ctx, `models.dev matches — import one with /model import <provider/id>:\n${lines.join("\n")}`);
+        }
+        const entry = hits[0]!;
+        const preset = presetFromEntry(entry, ctx.settings);
+        const presetName = entry.id.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+        ctx.settings.models[presetName] = preset;
+        saveGlobal(ctx.settings, new Set(["models"]));
+        return note(
+          ctx,
+          `⚡ imported "${presetName}" from models.dev (${entry.name}): family ${preset.family}, ctx ${preset.contextWindow ?? "?"}, maxTokens ${preset.maxTokens ?? "default"} — endpoint kept at ${preset.baseURL}; adjust in /setup, switch with /model ${presetName}`,
+        );
+      }
       if (!want) {
         const lines = names.map((n) => {
           const p = presets[n]!;
@@ -440,6 +497,27 @@ export const COMMANDS: SlashCommand[] = [
         })
         .join("\n");
       note(ctx, `past sessions — type /resume N to load:\n${list}`);
+    },
+  },
+  {
+    name: "rewind",
+    description: "undo a turn's file edits: /rewind lists, /rewind N restores",
+    run: async (ctx, args) => {
+      const cps = ctx.agent.checkpoints.list(); // newest first
+      if (cps.length === 0) return note(ctx, "no checkpoints yet — one is taken automatically before each turn's first file edit");
+      const want = args.trim();
+      if (want) {
+        const idx = want === "last" ? 1 : Number.parseInt(want, 10);
+        const cp = cps[idx - 1];
+        if (!cp) return note(ctx, `no checkpoint ${want} — /rewind to list`);
+        const report = ctx.agent.checkpoints.restore(cp.id);
+        return note(ctx, `⏪ rewound "${cp.label}" (${cp.startedAt.slice(0, 19)}):\n${report.join("\n")}\n\nNote: only write/edit tool changes are restored — bash side effects are not.`);
+      }
+      const list = cps
+        .slice(0, 10)
+        .map((c, i) => `  ${i + 1}. [${c.startedAt.slice(5, 16).replace("T", " ")}] ${c.label} — ${c.files.length} file${c.files.length === 1 ? "" : "s"}`)
+        .join("\n");
+      note(ctx, `checkpoints (newest first) — /rewind N restores the files as they were BEFORE that turn:\n${list}`);
     },
   },
   {

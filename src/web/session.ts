@@ -21,8 +21,9 @@ import { loadChains, saveChain, BUILTIN_STEPS } from "../chains/registry";
 import { loadSkills } from "../skills/registry";
 import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
-import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset } from "../setup/core";
+import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset, addFamily } from "../setup/core";
 import { modelProfile } from "../llm/profiles";
+import { searchModelsDev, presetFromEntry } from "../llm/modelsdev";
 import {
   saveSession, loadSession, loadSessionMetas, deleteSession, ensureWebDirs,
   CHATS_CWD, type SavedSession, type SavedSessionMeta, type SessionKind,
@@ -518,6 +519,40 @@ export class WebSession {
   setupPresetRemove(name: string): void {
     if (removePreset(this.settings, name)) {
       this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+    }
+  }
+
+  setupFamilyAdd(name: string): void {
+    const added = addFamily(this.settings, name);
+    if (!added) this.send({ t: "error", text: `family name "${name}" empty or already taken` });
+    this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+  }
+
+  /** models.dev search for the setup modal's import panel. */
+  async modelsdevSearch(query: string): Promise<void> {
+    try {
+      const hits = await searchModelsDev(query);
+      this.send({ t: "modelsdev_results", hits, query });
+    } catch (err) {
+      this.send({ t: "modelsdev_results", hits: [], query, error: (err as Error).message });
+    }
+  }
+
+  /** Import one models.dev entry as a /model preset (in memory — SAVE persists). */
+  async modelsdevImport(ref: string): Promise<void> {
+    try {
+      const hits = await searchModelsDev(ref);
+      const entry = hits.find((h) => h.ref === ref) ?? hits[0];
+      if (!entry) return this.send({ t: "error", text: `models.dev: nothing matches "${ref}"` });
+      const name = entry.id.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+      this.settings.models[name] = presetFromEntry(entry, this.settings);
+      this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+      this.bridge.pushItem({
+        type: "note",
+        text: `setup: imported "${name}" from models.dev (${entry.name}) — endpoint kept at ${this.settings.baseURL}; SAVE to persist, /model ${name} to switch`,
+      });
+    } catch (err) {
+      this.send({ t: "error", text: `models.dev import failed: ${(err as Error).message}` });
     }
   }
 

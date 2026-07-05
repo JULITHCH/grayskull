@@ -86,7 +86,9 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
   };
 
   const markDirty = (id: string) =>
-    setDirty((prev) => new Set(prev).add(id.startsWith("preset.") ? "models" : id));
+    setDirty((prev) =>
+      new Set(prev).add(id.startsWith("preset.") ? "models" : id.startsWith("family.") ? "families" : id),
+    );
 
   const apply = (field: SetupField, value: string) => {
     const ok = applyField(field.id, value, {
@@ -173,7 +175,7 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
       const row = rows[sel];
       if (row?.type !== "field" || !row.removable) return;
       if (removePreset(settings, row.removable)) {
-        setDirty((prev) => new Set(prev).add("models"));
+        setDirty((prev) => new Set(prev).add(row.removable!.startsWith("family:") ? "families" : "models"));
         let newLen = 0;
         for (const g of listGroups(settings)) newLen += 1 + g.fields.length;
         setSel((s) => Math.max(1, Math.min(s, newLen - 1)));
@@ -195,7 +197,9 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
   });
 
   const isDirty = (f: SetupField) =>
-    dirty.has(f.id) || (f.id.startsWith("preset.") && dirty.has("models"));
+    dirty.has(f.id) ||
+    (f.id.startsWith("preset.") && dirty.has("models")) ||
+    (f.id.startsWith("family.") && dirty.has("families"));
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>

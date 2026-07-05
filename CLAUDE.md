@@ -15,6 +15,9 @@ tool calls.
 ## Commands
 
 - run: `bun run src/index.tsx` (bun is at `~/.bun/bin`, may not be on PATH)
+- headless one-shot: `bun run src/index.tsx -p "<prompt>" [--mode kamikazeee] [--add-dir <d>]`
+  — final answer on stdout, tool/progress lines on stderr, permission asks
+  auto-denied (index.tsx `runHeadless`; CliLink skipped, MCP awaited ≤20s)
 - typecheck: `bunx tsc --noEmit`
 - build binary: `bun run build` → `dist/grayskull`
 
@@ -50,14 +53,30 @@ tool calls.
   workflow in DEFAULT_SYSTEM_PROMPT (TRIVIAL vs SUBSTANTIAL, 5 phases:
   research/blueprint/review/execute/verify). Chain steps exempt (chainStepActive,
   runIsolated disarms). Config `planFirst.enabled`.
+- `agent/hooks.ts` — user lifecycle hooks (`hooks` array in settings.json, Claude
+  Code conventions): PreToolUse / PostToolUse / Stop / UserPromptSubmit shell
+  commands, JSON payload on stdin, `matcher` globs the tool name, exit code 2
+  BLOCKS (stderr → message the model sees), stdout of non-blocking hooks is
+  appended as context. Wired in `runToolLoop` (pre blocks before the permission
+  prompt; post appends to the tool result; Stop can refuse the turn end, capped
+  at 2 per turn) and `runTurn` (prompt-submit). Broken hooks degrade silently.
+- `agent/checkpoints.ts` — /rewind insurance: `runToolLoop` snapshots each file
+  before an edit-kind tool touches it → `.grayskull/checkpoints/<seq>/`
+  (one checkpoint per turn: manifest.json + `N.snap`, pruned to
+  `checkpoints.keep`). `/rewind` lists turns, `/rewind N` restores pre-turn
+  contents (turn-created files deleted). bash/MCP side effects not covered.
 - `agent/diagnostics.ts` — post-edit compiler feedback: auto-detected project check
   (typecheck script/tsc/cargo/go vet/ruff, cached 60s) runs after every edit-kind tool
   in `runToolLoop`; failures are appended to the tool result. Config: `diagnostics`
   key in settings. MCP extras: `if` marker-file gating + `${cwd}` arg substitution in
   `mcp/manager.ts`; built-ins lsp-ts/lsp-go (isaacphi/mcp-language-server, installed
   at ~/go/bin) and context7 in `config/settings.ts`.
-- `tools/` — built-ins (bash/read/write/edit/grep/glob/ask_user/todo); `ToolRegistry.schemas()`
-  converts zod → JSON Schema via `z.toJSONSchema` (zod 4). MCP tools carry raw `jsonSchema`.
+- `tools/` — built-ins (bash/bash_output/read/write/edit/grep/glob/ask_user/todo);
+  `ToolRegistry.schemas()` converts zod → JSON Schema via `z.toJSONSchema` (zod 4).
+  MCP tools carry raw `jsonSchema`. bash `background=true` runs detached (dev
+  servers/watchers): returns a job id immediately, output buffered 200KB in
+  tools/bash.ts module state; `bash_output(id)` reads deltas, `kill=true` kills
+  the process group, no id lists jobs.
 - `perms/engine.ts` — modes: normal / accept-edits / plan / kamikazeee (shift+tab cycle);
   Claude Code-style patterns `bash(git *)`.
 - `memory/memory.ts` — global vault `~/.config/grayskull/GRAYSKULL.md` (explicit
@@ -83,13 +102,25 @@ tool calls.
   override), runner.ts (sequential execution, VERDICT PASS/FAIL gates with jump-back,
   shared vs fresh context modes; applies each step's InferenceProfile via
   `agent.setInferenceProfile` in a try/finally; `chainState` feeds the statusline).
-- `llm/profiles.ts` — model-family abstraction (`qwen3.5`/`glm4.5`): leak dialect,
-  vLLM parser flags (doc only), and `codegen`/`reason` inference presets (thinking +
-  sampling). `LlmClient.setInferenceProfile()` applies a transient per-request override
+- `llm/profiles.ts` — model families as DATA: leak dialect, vLLM parser flags
+  (doc only), `codegen`/`reason` inference presets (thinking + sampling).
+  Built-ins `qwen3.5`/`glm4.5` are seeds; `settings.families` adds/overrides
+  families (zod `FamilyProfileSchema`), installed via `registerFamilies` from
+  `loadSettings`/`registerCustomFamilies` — `modelFamily` and preset `family`
+  are free strings, unknown names fall back to qwen3.5. Managed via `/families`
+  (add/remove, clones the active family) and per-family /setup groups
+  (`FAMILY_SPEC`, dotted keys, saved whole like `models`). The registry is
+  process-global: in grayskull-web the most recently loaded session's
+  `families` wins on same-name collisions across projects.
+  `LlmClient.setInferenceProfile()` applies a transient per-request override
   (temp/topP/topK/minP/enableThinking) over settings; `oneShot` never inherits it.
-  Selected by `settings.modelFamily` (default qwen3.5). GLM handoff: `glm-server-notes.md`.
-  `repair.ts` recoverTextToolCall takes the dialect: `qwen` (JSON) or `glm` (XML
-  `<tool_call>name<arg_key>/<arg_value>`).
+  GLM handoff: `glm-server-notes.md`. `repair.ts` recoverTextToolCall takes the
+  dialect: `qwen` (JSON) or `glm` (XML `<tool_call>name<arg_key>/<arg_value>`).
+- `llm/modelsdev.ts` — models.dev metadata import: full dump cached 24h at
+  `~/.config/grayskull/models-dev.json`; `/model import <query>` searches
+  (exact `provider/id` or substring, tool-callers ranked first) and seeds a
+  /model preset (contextWindow, maxTokens capped at DEFAULT_MAX_TOKENS; endpoint
+  stays the active baseURL — models.dev knows models, not your server).
 - `config/settings.ts` — zod schema, precedence: defaults < global < local settings.json.
   Seeded global settings include the playwright MCP server (headless Chrome, 23 tools);
   the `webtest` skill (examples/skills/, installed at ~/.config/grayskull/skills/)
@@ -98,14 +129,22 @@ tool calls.
 - `ui/App.tsx` — single-file Ink UI (transcript, custom input, permission/ask prompts,
   statusline). `ui/external.ts` suspends raw mode for $EDITOR and fzf. `ui/setup.tsx` —
   /setup Ink dialog; the UI-agnostic logic lives in `setup/core.ts` and is
-  schema-driven: `PRESET_SPEC`/`ACTIVE_SPEC` field tables (kind text/number/
-  enum/toggle) define what an LLM is — extend there and TUI + web modal +
-  persistence pick it up. listGroups (active + per-preset + websearch groups),
-  applyField (typed coercion, live via `client.reconfigure`/`mcp.reconnect`),
+  schema-driven: `PRESET_SPEC`/`ACTIVE_SPEC`/`FAMILY_SPEC`/`CONF_SPEC` field
+  tables (kind text/number/enum/toggle; dotted keys reach nested objects;
+  enum options may be a function, resolved at render) define the whole
+  configuration — extend there and TUI + web modal + persistence pick it up.
+  listGroups (active + per-preset + per-family + BEHAVIOR + websearch groups),
+  applyField (typed coercion, live via `client.reconfigure`/`mcp.reconnect`;
+  `conf.*` edits are zod-revalidated and rolled back if out of bounds),
   addPreset/removePreset (models record saved whole so deleted seeded defaults
-  stay gone), saveGlobal (patches raw global settings.json), checkServices
-  (searxng probed over HTTP, lsp binaries, playwright config + fix
-  instructions). Web modal: session.ts setup* methods, `setup_*` WS messages.
+  stay gone; removable handle `family:<name>` routes to removeFamily),
+  addFamily/removeFamily, saveGlobal (patches raw global settings.json),
+  checkServices (searxng probed over HTTP, lsp binaries, playwright config +
+  fix instructions). Web modal: ⚙ cog chip in the header (or /setup) opens a
+  TABBED settings dialog — ACTIVE MODEL / LLM PRESETS (with + ADD LLM and a
+  models.dev search+import panel) / FAMILIES (+ ADD FAMILY) / BEHAVIOR /
+  SERVICES; session.ts setup* + modelsdev* methods, `setup_*`,
+  `setup_family_add`, `modelsdev_search`, `modelsdev_import` WS messages.
   Opened through `CommandContext.openSetup` (set by both TUI App and WebSession).
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
   via `with {type:"text"}`; `session.ts` WebSession wraps GrayskullAgent with a WS

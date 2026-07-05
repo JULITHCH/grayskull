@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ToolDef } from "../types";
 import type { ToolSchema } from "../llm/client";
-import { bashTool } from "./bash";
+import { bashTool, bashOutputTool } from "./bash";
 import { readTool, writeTool, editTool } from "./files";
 import { grepTool, globTool } from "./search";
 import { askUserTool } from "./ask_user";
@@ -9,7 +9,7 @@ import { todoTool } from "./todo";
 import { httpTool } from "./http";
 
 export function builtinTools(): ToolDef[] {
-  return [bashTool, readTool, writeTool, editTool, grepTool, globTool, httpTool, askUserTool, todoTool];
+  return [bashTool, bashOutputTool, readTool, writeTool, editTool, grepTool, globTool, httpTool, askUserTool, todoTool];
 }
 
 export class ToolRegistry {

@@ -2,6 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Settings, ModelPreset } from "../config/settings";
+import { registerCustomFamilies, SettingsSchema } from "../config/settings";
+import { familyNames, modelProfile, BUILTIN_FAMILIES } from "../llm/profiles";
 import { GLOBAL_SETTINGS } from "../config/paths";
 import type { McpManager } from "../mcp/manager";
 import type { LlmClient } from "../llm/client";
@@ -17,21 +19,21 @@ import type { LlmClient } from "../llm/client";
 export type FieldKind = "text" | "number" | "enum" | "toggle";
 
 export interface FieldSpec {
-  /** settings/preset property name */
+  /** settings/preset property name — may be a dotted path (family presets) */
   key: string;
   label: string;
   kind: FieldKind;
-  /** for kind "enum" */
-  options?: readonly string[];
+  /** for kind "enum" — a function is resolved at render time (dynamic lists) */
+  options?: readonly string[] | (() => readonly string[]);
   /** short explainer shown next to the field */
   help?: string;
   /** number/text may be cleared (removes the key from a preset) */
   optional?: boolean;
 }
 
-/** model families — the tool-call leak dialect + chain sampling presets
- *  (llm/profiles.ts); mirrored by the zod enum in config/settings.ts */
-export const FAMILIES = ["qwen3.5", "glm4.5"] as const;
+/** model families are data now (built-ins + settings.families) — resolved
+ *  live so a family added in this very dialog appears in the pickers */
+const FAMILIES = () => familyNames();
 
 /** What an LLM preset consists of. Extend here — TUI, web modal and
  *  persistence pick the new field up automatically. */
@@ -61,6 +63,45 @@ export const ACTIVE_SPEC: readonly FieldSpec[] = [
   { key: "topP", label: "top_p", kind: "number" },
   { key: "topK", label: "top_k", kind: "number" },
   { key: "enableThinking", label: "thinking", kind: "toggle" },
+] as const;
+
+/** A model family as editable data (settings.families) — dotted keys reach
+ *  the nested chain-step presets. Custom families appear as setup groups;
+ *  built-ins are shown read-only via /families, override by adding a custom
+ *  family with the same name (/families add <name>). */
+export const FAMILY_SPEC: readonly FieldSpec[] = [
+  { key: "leakDialect", label: "leak dialect", kind: "enum", options: ["qwen", "glm"], help: "plaintext tool-call recovery format (repair.ts)" },
+  { key: "toolCallParser", label: "vLLM tool parser", kind: "text", optional: true, help: "launch-flag documentation only" },
+  { key: "reasoningParser", label: "vLLM reasoning parser", kind: "text", optional: true },
+  { key: "presets.codegen.enableThinking", label: "codegen: thinking", kind: "toggle" },
+  { key: "presets.codegen.temperature", label: "codegen: temperature", kind: "number" },
+  { key: "presets.codegen.topP", label: "codegen: top_p", kind: "number" },
+  { key: "presets.codegen.topK", label: "codegen: top_k", kind: "number" },
+  { key: "presets.reason.enableThinking", label: "reason: thinking", kind: "toggle" },
+  { key: "presets.reason.temperature", label: "reason: temperature", kind: "number" },
+  { key: "presets.reason.topP", label: "reason: top_p", kind: "number" },
+  { key: "presets.reason.topK", label: "reason: top_k", kind: "number" },
+] as const;
+
+/** Harness behavior knobs (top-level settings beyond the model stack) —
+ *  rendered as the BEHAVIOR group/tab in both setup UIs. Dotted keys reach
+ *  nested objects; values are zod-revalidated on apply so a GUI edit can
+ *  never write a settings.json that fails to load. */
+export const CONF_SPEC: readonly FieldSpec[] = [
+  { key: "defaultMode", label: "default mode", kind: "enum", options: ["normal", "accept-edits", "plan", "kamikazeee"], help: "permission mode at session start" },
+  { key: "compactStrategy", label: "context-full strategy", kind: "enum", options: ["memory-swap", "summarize"], help: "memory-swap = brief + clear window" },
+  { key: "compactThreshold", label: "compact threshold", kind: "number", help: "0.3–0.95 of the context window" },
+  { key: "maxLoopTurns", label: "max tool iterations / turn", kind: "number" },
+  { key: "streamStallSeconds", label: "stream stall timeout (s)", kind: "number" },
+  { key: "agentConcurrency", label: "sub-agent concurrency", kind: "number", help: "1–8" },
+  { key: "memory.enabled", label: "memory", kind: "toggle", help: "auto-extract project memory per turn" },
+  { key: "memory.scoring", label: "memory scoring", kind: "toggle", help: "ACT-R decay + reinforcement" },
+  { key: "planFirst.enabled", label: "plan-first gate", kind: "toggle", help: "blueprint before substantial edits" },
+  { key: "visualVerify.enabled", label: "visual-verify gate", kind: "toggle", help: "force render+assert on visual work" },
+  { key: "diagnostics.enabled", label: "post-edit diagnostics", kind: "toggle", help: "typecheck after every edit" },
+  { key: "stuckResearch.enabled", label: "stuck auto-research", kind: "toggle", help: "web-research nudge when stuck" },
+  { key: "checkpoints.enabled", label: "checkpoints (/rewind)", kind: "toggle", help: "snapshot files before edits" },
+  { key: "checkpoints.keep", label: "checkpoints kept", kind: "number" },
 ] as const;
 
 export interface SetupField {
@@ -96,8 +137,28 @@ export function getSearxngUrl(settings: Settings): string {
   return "http://127.0.0.1:8080";
 }
 
+/** Dotted-path access — FAMILY_SPEC keys address nested chain presets. */
+function getPath(source: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], source);
+}
+
+function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const keys = path.split(".");
+  let obj = target;
+  for (const k of keys.slice(0, -1)) {
+    obj = (obj[k] ??= {}) as Record<string, unknown>;
+  }
+  const last = keys[keys.length - 1]!;
+  if (value === undefined) delete obj[last];
+  else obj[last] = value;
+}
+
+function resolveOptions(spec: FieldSpec): readonly string[] | undefined {
+  return typeof spec.options === "function" ? spec.options() : spec.options;
+}
+
 function fieldValue(source: Record<string, unknown>, spec: FieldSpec): string {
-  const v = source[spec.key];
+  const v = getPath(source, spec.key);
   if (v === undefined || v === null) return "";
   if (spec.kind === "toggle") return v ? "on" : "off";
   return String(v);
@@ -111,11 +172,12 @@ function specFields(prefix: string, spec: readonly FieldSpec[], source: Record<s
       kind: f.kind,
       value: fieldValue(source, f),
     };
-    if (f.options) field.options = f.options;
+    const options = resolveOptions(f);
+    if (options) field.options = options;
     let hint = f.help;
     // surface whether the configured api-key env var actually exists
     if (f.key.toLowerCase().includes("apikeyenv")) {
-      const env = String(source[f.key] ?? "");
+      const env = String(getPath(source, f.key) ?? "");
       if (env) hint = process.env[env] ? "env ✓ set" : "env ✗ NOT SET";
     }
     if (hint) field.hint = hint;
@@ -141,6 +203,20 @@ export function listGroups(settings: Settings): SetupGroup[] {
       fields: specFields(`preset.${name}`, PRESET_SPEC, preset as unknown as Record<string, unknown>),
     });
   }
+  for (const [name, fam] of Object.entries(settings.families)) {
+    const overrides = name in BUILTIN_FAMILIES ? " (overrides built-in)" : "";
+    groups.push({
+      id: `family.${name}`,
+      title: `FAMILY ${name}${overrides}`,
+      removable: `family:${name}`,
+      fields: specFields(`family.${name}`, FAMILY_SPEC, fam as unknown as Record<string, unknown>),
+    });
+  }
+  groups.push({
+    id: "conf",
+    title: "BEHAVIOR",
+    fields: specFields("conf", CONF_SPEC, settings as unknown as Record<string, unknown>),
+  });
   groups.push({
     id: "web",
     title: "WEB SEARCH",
@@ -160,7 +236,7 @@ function coerce(spec: FieldSpec, raw: string): string | number | boolean | null 
     case "text":
       return v;
     case "enum":
-      return spec.options?.includes(v) ? v : null;
+      return resolveOptions(spec)?.includes(v) ? v : null;
     case "number": {
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
@@ -217,7 +293,55 @@ export function applyField(id: string, value: string, ctx: ApplyContext): boolea
     return true;
   }
 
+  const conf = id.match(/^conf\.(.+)$/);
+  if (conf) {
+    const spec = CONF_SPEC.find((f) => f.key === conf[1]);
+    if (!spec) return false;
+    const v = coerce(spec, value);
+    if (v === null || v === undefined) return false; // behavior knobs are never unset
+    const rec = settings as unknown as Record<string, unknown>;
+    const prev = getPath(rec, spec.key);
+    setPath(rec, spec.key, v);
+    // zod bounds (compactThreshold 0.3–0.95 etc.): a value that would make the
+    // saved settings.json unloadable is rejected and rolled back here
+    if (!SettingsSchema.safeParse(settings).success) {
+      setPath(rec, spec.key, prev);
+      return false;
+    }
+    return true;
+  }
+
+  const family = id.match(/^family\.([^.]+)\.(.+)$/);
+  if (family) {
+    const fam = settings.families[family[1]!];
+    const spec = FAMILY_SPEC.find((f) => f.key === family[2]);
+    if (!fam || !spec) return false;
+    const v = coerce(spec, value);
+    if (v === null) return false;
+    setPath(fam as unknown as Record<string, unknown>, spec.key, v);
+    registerCustomFamilies(settings); // live: leak dialect + chain presets re-resolve
+    return true;
+  }
+
   return false;
+}
+
+/** Add a custom family cloned from the profile `modelFamily` resolves to now
+ *  (built-in or custom). Returns the normalized name, or null if empty/taken. */
+export function addFamily(settings: Settings, name: string): string | null {
+  const n = name.trim().toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!n || settings.families[n]) return null;
+  const { family: _family, ...seed } = modelProfile(settings.modelFamily);
+  settings.families[n] = structuredClone(seed);
+  registerCustomFamilies(settings);
+  return n;
+}
+
+export function removeFamily(settings: Settings, name: string): boolean {
+  if (!settings.families[name]) return false;
+  delete settings.families[name];
+  registerCustomFamilies(settings);
+  return true;
 }
 
 /** Add a new /model preset cloned from the active stack. Returns the
@@ -242,8 +366,12 @@ export function addPreset(settings: Settings, name: string): string | null {
 
 /** Remove a preset — grayskull's seeded defaults included. Once the models
  *  record is saved, settings.json owns it entirely (zod's defaults only apply
- *  while the key is absent), so removed defaults stay gone. */
+ *  while the key is absent), so removed defaults stay gone. A "family:<name>"
+ *  handle (SetupGroup.removable for family groups) removes a custom family
+ *  instead — both UIs route their remove buttons through here. */
 export function removePreset(settings: Settings, name: string): boolean {
+  const fam = name.match(/^family:(.+)$/);
+  if (fam) return removeFamily(settings, fam[1]!);
   if (!settings.models[name]) return false;
   delete settings.models[name];
   return true;
@@ -272,6 +400,12 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
       // presets are saved as the whole record: settings.json then owns the
       // list, which is what makes deleting a seeded default stick
       raw["models"] = settings.models;
+    } else if (id === "families" || id.startsWith("family.")) {
+      raw["families"] = settings.families;
+    } else if (id.startsWith("conf.")) {
+      // patch the whole top-level segment (memory.enabled → the memory object)
+      const seg = id.slice(5).split(".")[0]!;
+      raw[seg] = (settings as unknown as Record<string, unknown>)[seg];
     }
   }
   writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");

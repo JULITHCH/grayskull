@@ -7,6 +7,7 @@ import {
   localSettings,
   localSystemPrompt,
 } from "./paths";
+import { registerFamilies, type ModelProfile } from "../llm/profiles";
 
 const McpServerSchema = z.union([
   z.object({
@@ -33,8 +34,38 @@ const McpServerSchema = z.union([
  *  to this on switch (so a small preset's cap never leaks to the next model) */
 export const DEFAULT_MAX_TOKENS = 32768;
 
+const InferenceProfileSchema = z.object({
+  enableThinking: z.boolean(),
+  temperature: z.number(),
+  topP: z.number(),
+  topK: z.number(),
+  minP: z.number().default(0),
+});
+
+/** A model family as pure data — what llm/profiles.ts hardcoded before.
+ *  settings.families adds new families (or overrides a built-in) without a
+ *  code change; /setup and /families edit them, models.dev seeds presets. */
+const FamilyProfileSchema = z.object({
+  /** vLLM launch flags — recorded for the launch script/docs, not sent per request */
+  toolCallParser: z.string().default(""),
+  reasoningParser: z.string().default(""),
+  /** which plaintext tool-call leakage format to recover (repair.ts) */
+  leakDialect: z.enum(["qwen", "glm"]).default("qwen"),
+  presets: z
+    .object({
+      codegen: InferenceProfileSchema,
+      reason: InferenceProfileSchema,
+    })
+    .default({
+      codegen: { enableThinking: false, temperature: 0.7, topP: 0.8, topK: 20, minP: 0 },
+      reason: { enableThinking: true, temperature: 0.6, topP: 0.95, topK: 20, minP: 0 },
+    }),
+});
+export type FamilyProfile = z.infer<typeof FamilyProfileSchema>;
+
 const ModelPresetSchema = z.object({
-  family: z.enum(["qwen3.5", "glm4.5"]),
+  /** family name — a built-in ("qwen3.5", "glm4.5") or a settings.families key */
+  family: z.string(),
   baseURL: z.string(),
   model: z.string(),
   apiKeyEnv: z.string().optional(),
@@ -57,8 +88,11 @@ export const SettingsSchema = z.object({
   baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
   model: z.string().default("nvidia/Qwen3.6-35B-A3B-NVFP4"),
-  /** model family — selects leak-recovery dialect + chain-step sampling presets. */
-  modelFamily: z.enum(["qwen3.5", "glm4.5"]).default("qwen3.5"),
+  /** model family — selects leak-recovery dialect + chain-step sampling presets.
+   *  Any built-in or settings.families name; unknown names fall back to qwen3.5. */
+  modelFamily: z.string().default("qwen3.5"),
+  /** custom model families (data-driven llm/profiles.ts) — key = family name */
+  families: z.record(z.string(), FamilyProfileSchema).default({}),
   contextWindow: z.number().default(262144),
   maxTokens: z.number().default(DEFAULT_MAX_TOKENS),
   /** abort an LLM request when no stream chunk arrives for this long (wedged
@@ -210,6 +244,31 @@ export const SettingsSchema = z.object({
     })
     .default({ enabled: true }),
   mcpServers: z.record(z.string(), McpServerSchema).default({}),
+  /** user lifecycle hooks (agent/hooks.ts): shell commands run at tool-loop
+   *  events. The JSON payload arrives on stdin; exit code 2 blocks the action
+   *  (stderr becomes the message the model sees) — Claude Code conventions. */
+  hooks: z
+    .array(
+      z.object({
+        event: z.enum(["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit"]),
+        /** glob against the tool name (e.g. "bash", "mcp__*"); absent = all */
+        matcher: z.string().optional(),
+        command: z.string(),
+        timeoutSeconds: z.number().int().min(1).max(120).default(10),
+      }),
+    )
+    .default([]),
+  /** extra working directories surfaced to the model (CLI --add-dir adds more) */
+  addDirs: z.array(z.string()).default([]),
+  /** checkpoint/rewind: snapshot files before every edit-kind tool so /rewind
+   *  can restore them (see agent/checkpoints.ts) */
+  checkpoints: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** keep at most this many turn snapshots per project */
+      keep: z.number().int().min(1).default(30),
+    })
+    .default({ enabled: true, keep: 30 }),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -291,7 +350,18 @@ export function loadSettings(cwd: string): Settings {
   const settings = parsed.data;
   settings.mcpServers = { ...BUILTIN_MCP, ...settings.mcpServers };
   settings.permissions.allow = [...BUILTIN_ALLOW, ...settings.permissions.allow];
+  registerCustomFamilies(settings);
   return settings;
+}
+
+/** Install settings.families into the profile registry (custom wins over a
+ *  same-name built-in). Re-call after live edits to settings.families. */
+export function registerCustomFamilies(settings: Settings): void {
+  const profiles: Record<string, ModelProfile> = {};
+  for (const [name, f] of Object.entries(settings.families)) {
+    profiles[name] = { family: name, ...f };
+  }
+  registerFamilies(profiles);
 }
 
 export const DEFAULT_SYSTEM_PROMPT = `You are GRAYSKULL, a terminal coding agent running on a local model. You help the user with software tasks in the current working directory using the tools provided.

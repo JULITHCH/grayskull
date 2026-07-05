@@ -15,6 +15,8 @@ import { VisualVerifyGate } from "./visual";
 import { PlanGate } from "./plan";
 import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
+import { HookRunner } from "./hooks";
+import { CheckpointStore } from "./checkpoints";
 import type { ModelPreset } from "../config/settings";
 import { resolveStepProfile, resolveStepConfig } from "../chains/registry";
 import type { ChainDef } from "../chains/registry";
@@ -24,6 +26,7 @@ import { randomQuip } from "../ui/quips";
 const MAX_LOOP_TURNS = 40;
 const MAX_REPAIR_ATTEMPTS = 3;
 const MAX_LENGTH_CONTINUES = 3;
+const MAX_STOP_BLOCKS = 2;
 
 export interface PermissionRequest {
   toolName: string;
@@ -76,6 +79,11 @@ export async function runToolLoop(opts: {
    *  returned string replaces the execution as the tool result — used by the
    *  plan-first gate to refuse code-before-blueprint on substantial turns */
   beforeEdit?: (toolName: string, detail: string) => string | null;
+  /** user lifecycle hooks (settings.hooks) — PreToolUse can block a call,
+   *  PostToolUse appends to results, Stop can block the turn end */
+  hooks?: HookRunner;
+  /** /rewind insurance: snapshots a file right before an edit tool touches it */
+  checkpoints?: CheckpointStore;
   /** cap on tool iterations for this loop (default MAX_LOOP_TURNS) */
   maxTurns?: number;
   /** unattended run (kamikazeee): the iteration cap warns instead of stopping —
@@ -87,6 +95,7 @@ export async function runToolLoop(opts: {
   const repairCounts = new Map<string, number>();
   let lastText = "";
   let lengthContinues = 0;
+  let stopBlocks = 0;
   const maxTurns = opts.maxTurns ?? MAX_LOOP_TURNS;
   // distinguishes "model finished" from "iteration cap ran out" — the latter
   // used to end the turn in total silence, which reads as a hang
@@ -177,6 +186,16 @@ export async function runToolLoop(opts: {
         messages.push({ role: "user", content: block });
         continue;
       }
+      // user Stop hooks may also refuse the turn end (capped so a hook that
+      // always exits 2 cannot spin the loop forever)
+      if (stopBlocks < MAX_STOP_BLOCKS && opts.hooks?.has("Stop")) {
+        const h = opts.hooks.run("Stop", { toolResult: lastText.slice(0, 8000) });
+        if (h.block) {
+          stopBlocks++;
+          messages.push({ role: "user", content: `[A Stop hook refused to end the turn]:\n${h.block}` });
+          continue;
+        }
+      }
       ranOut = false;
       break;
     }
@@ -223,6 +242,15 @@ export async function runToolLoop(opts: {
           continue;
         }
       }
+      // user PreToolUse hooks: exit code 2 blocks the call (before the
+      // permission prompt, same reasoning as the plan gate above)
+      if (opts.hooks?.has("PreToolUse")) {
+        const h = opts.hooks.run("PreToolUse", { toolName: tool.name, toolArgs: args });
+        if (h.block) {
+          tasks.push({ call, reply: `A PreToolUse hook blocked this call: ${h.block}` });
+          continue;
+        }
+      }
       const item: TranscriptItem & { type: "tool" } = {
         type: "tool",
         name: tool.name,
@@ -257,6 +285,10 @@ export async function runToolLoop(opts: {
     const runExec = async (t: ExecTask): Promise<void> => {
       opts.onToolEvent?.({ ...t.item });
       try {
+        // pre-edit snapshot so /rewind can restore this turn's file states
+        if (t.tool.kind === "edit") {
+          opts.checkpoints?.snapshot(String(t.args["path"] ?? ""), ctx.cwd);
+        }
         const raw = await t.tool.execute(t.args, ctx);
         let result = typeof raw === "string" ? raw : raw.text;
         if (typeof raw !== "string" && raw.images?.length) {
@@ -265,6 +297,14 @@ export async function runToolLoop(opts: {
         if (t.tool.kind === "edit" && !result.startsWith("error:")) {
           const diag = runDiagnostics(ctx.cwd);
           if (diag) result += `\n\n${diag}`;
+        }
+        if (opts.hooks?.has("PostToolUse")) {
+          const h = opts.hooks.run("PostToolUse", {
+            toolName: t.tool.name,
+            toolArgs: t.args,
+            toolResult: result.slice(0, 8000),
+          });
+          if (h.output) result += `\n\n[PostToolUse hook]\n${h.output}`;
         }
         t.item.state = "done";
         t.item.result = result;
@@ -473,7 +513,16 @@ export class GrayskullAgent {
     this.stuck = new StuckTracker(opts.settings.stuckResearch);
     this.visual = new VisualVerifyGate(opts.settings.visualVerify);
     this.plan = new PlanGate(opts.settings.planFirst);
+    this.hooks = new HookRunner(opts.settings, opts.cwd, (text) =>
+      this.ui.pushItem({ type: "note", text }),
+    );
+    this.checkpoints = new CheckpointStore(opts.cwd, opts.settings.checkpoints);
   }
+
+  /** user lifecycle hooks (settings.hooks) */
+  private hooks: HookRunner;
+  /** pre-edit file snapshots for /rewind */
+  readonly checkpoints: CheckpointStore;
 
   /** stuck detection → auto web-research nudge (see agent/stuck.ts) */
   private stuck: StuckTracker;
@@ -571,6 +620,9 @@ export class GrayskullAgent {
     const gitInfo = git.status === 0 ? git.stdout.split("\n").slice(0, 15).join("\n") : "(not a git repo)";
     const env = [
       `cwd: ${this.cwd}`,
+      ...(this.settings.addDirs.length
+        ? [`additional working directories (also yours to read/edit): ${this.settings.addDirs.join(", ")}`]
+        : []),
       `date: ${new Date().toISOString().slice(0, 10)}`,
       `platform: ${process.platform}`,
       `git:\n${gitInfo}`,
@@ -656,6 +708,19 @@ export class GrayskullAgent {
     this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, randomQuip());
+    // one checkpoint per turn — the /rewind unit
+    this.checkpoints.beginTurn(userText);
+    // user UserPromptSubmit hooks: can block the turn or add context
+    if (this.hooks.has("UserPromptSubmit")) {
+      const h = this.hooks.run("UserPromptSubmit", { prompt: userText });
+      if (h.block) {
+        this.ui.pushItem({ type: "note", text: `⛔ UserPromptSubmit hook blocked this prompt: ${h.block}` });
+        this.ui.setBusy(false);
+        this.abort = null;
+        return "";
+      }
+      if (h.output) userText = `${userText}\n\n[UserPromptSubmit hook context]\n${h.output}`;
+    }
     // repeated problem report / episode reset (arms an auto-research nudge)
     this.stuck.notePrompt(userText);
     // visual turn? (image attached or rendering vocabulary) → verify gate arms
@@ -750,6 +815,7 @@ export class GrayskullAgent {
     this.lastError = null;
     const signal = this.abort.signal;
     this.ui.setBusy(true, "chain step");
+    this.checkpoints.beginTurn(`[chain step] ${directive.slice(0, 100)}`);
     // fresh-context chain steps plan via their own chain steps — a stale armed
     // gate from a previous interactive turn must not block their edits
     this.plan.disarm();
@@ -805,6 +871,8 @@ export class GrayskullAgent {
       maxTurns: this.settings.maxLoopTurns,
       unattended: () => this.perms.mode === "kamikazeee" && !this.chainStepActive,
       leakDialect: this.leakDialect,
+      hooks: this.hooks,
+      checkpoints: this.checkpoints,
       maybeCompact: (m) => this.compactInLoop(m),
       drainInjections: () => {
         if (this.injections.length === 0) return [];
