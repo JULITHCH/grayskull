@@ -1,12 +1,16 @@
-# GRAYSKULL — Claude Code-style CLI agent for local vLLM
+# GRAYSKULL — Claude Code-style CLI agent for local models (multi-model)
 
-TypeScript + Ink 7 + Bun. Targets the Spark vLLM endpoint (`http://10.8.0.22:8000/v1`,
-model `happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound`, key from `$LMSTUDIO_API_KEY`).
-Server runs `--tool-call-parser qwen3_xml --reasoning-parser qwen3 --max-model-len 196608`
-(spark-vllm-docker `qwen3.5-122b-heretic` recipe, --solo). Defaults follow the Qwen
-non-thinking coding preset: temp 0.7, topP 0.8, topK 20; `enableThinking` off, toggled
-via `chat_template_kwargs`. Reasoning deltas (`reasoning_content`) stream separately —
-rendered dimmed, never scanned for tool calls.
+TypeScript + Ink 7 + Bun. Default endpoint is the Spark box (key from
+`$LMSTUDIO_API_KEY`), which runs THREE resident vLLM systemd services concurrently:
+`:8000` Qwen3.6-35B-A3B-NVFP4 (main; MTP spec decode, `--tool-call-parser qwen3_xml
+--reasoning-parser qwen3 --max-model-len 262144`, reasoning_content empty on this
+build), `:8001` Llama-3.1-8B NVFP4 (`llama3_json`), `:8002` Nemotron-Nano-9B
+(`qwen3_xml`, 8k ctx). `/model` switches presets instantly; heavy solo recipes
+(qwen35 122B-heretic, glm GLM-4.5-Air) replace the trio when launched. Defaults
+follow the Qwen non-thinking coding preset: temp 0.7, topP 0.8, topK 20;
+`enableThinking` off, toggled via `chat_template_kwargs`. Reasoning deltas
+(`reasoning_content`) stream separately — rendered dimmed, never scanned for
+tool calls.
 
 ## Commands
 

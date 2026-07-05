@@ -51,7 +51,9 @@ export type ModelPreset = z.infer<typeof ModelPresetSchema>;
 
 export const SettingsSchema = z.object({
   // defaults to Qwen3.6-35B-A3B NVFP4 on 10.8.0.22:8000 (reuses the qwen3.5 model
-  // profile); /model qwen36 / qwen35 / glm switch the whole stack live.
+  // profile). The Spark runs three resident vLLM systemd services: 8000 qwen3.6-35b
+  // (main), 8001 llama-8b, 8002 nemotron-9b — /model switches between them
+  // instantly; the heavy solo recipes (qwen35 122B, glm) replace the trio.
   baseURL: z.string().default("http://10.8.0.22:8000/v1"),
   apiKeyEnv: z.string().default("LMSTUDIO_API_KEY"),
   model: z.string().default("nvidia/Qwen3.6-35B-A3B-NVFP4"),
@@ -80,21 +82,11 @@ export const SettingsSchema = z.object({
   models: z
     .record(z.string(), ModelPresetSchema)
     .default({
-      qwen35: {
-        family: "qwen3.5",
-        baseURL: "http://10.8.0.22:8000/v1",
-        model: "happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound",
-        contextWindow: 196608,
-        temperature: 0.7,
-        topP: 0.8,
-        topK: 20,
-      },
       "qwen36-nvfp4": {
-        // Qwen3.6-35B-A3B NVFP4 (DGX Spark build) on :8000 — the preferred,
-        // faster (~120 tok/s) Qwen3.6 build; reuses the qwen3.5 profile.
-        // MTP spec-decoding is transparent; reasoning_content stays empty on
-        // this vLLM build (the answer is in content). Launch:
-        // ~/work/start-model.sh qwen36-nvfp4
+        // Qwen3.6-35B-A3B NVFP4 on :8000 — the MAIN resident model (systemd
+        // unit qwen-vllm): MTP spec decode, fp8 KV, flashinfer. MTP is
+        // transparent; reasoning_content stays empty on this build (the
+        // answer is in content).
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8000/v1",
         model: "nvidia/Qwen3.6-35B-A3B-NVFP4",
@@ -103,29 +95,9 @@ export const SettingsSchema = z.object({
         topP: 0.8,
         topK: 20,
       },
-      qwen36: {
-        // Qwen3.6-35B-A3B (FP8 + DFlash) on :8002 — same model, slower build.
-        // reuses the qwen3.5 model profile (leak dialect + chain presets).
-        family: "qwen3.5",
-        baseURL: "http://10.8.0.22:8002/v1",
-        model: "qwen3.6-35b-a3b",
-        contextWindow: 262144,
-        temperature: 0.7,
-        topP: 0.8,
-        topK: 20,
-      },
-      glm: {
-        family: "glm4.5",
-        baseURL: "http://10.8.0.22:8001/v1",
-        model: "glm-4.5-air",
-        contextWindow: 131072,
-        temperature: 0.6,
-        topP: 0.95,
-        topK: 40,
-      },
       "llama-8b": {
-        // Llama-3.1-8B-Instruct NVFP4 on :8001 — tiny model, fast but limited.
-        // Good for quick tasks where the bigger models are busy.
+        // Llama-3.1-8B-Instruct NVFP4 on :8001 (systemd unit vllm-llama) —
+        // resident alongside the 35B; fast but limited, llama3_json tools.
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8001/v1",
         model: "nvidia/Llama-3.1-8B-Instruct-NVFP4",
@@ -135,9 +107,9 @@ export const SettingsSchema = z.object({
         topK: 20,
       },
       "nemotron-9b": {
-        // NVIDIA Nemotron-Nano-9B-v2 NVFP4 on :8002 — ultra-small, very fast.
-        // Use for simple tasks or when speed matters more than quality.
-        // Served at max_model_len=8192, so cap maxTokens below that.
+        // Nemotron-Nano-9B-v2 NVFP4 on :8002 (systemd unit vllm-nemo) —
+        // ultra-small resident utility model. Served at max_model_len=8192,
+        // so cap maxTokens below that.
         family: "qwen3.5",
         baseURL: "http://10.8.0.22:8002/v1",
         model: "nvidia/NVIDIA-Nemotron-Nano-9B-v2-NVFP4",
@@ -146,6 +118,27 @@ export const SettingsSchema = z.object({
         temperature: 0.7,
         topP: 0.8,
         topK: 20,
+      },
+      qwen35: {
+        // Qwen3.5-122B heretic — heavy solo recipe (spark-vllm-docker,
+        // qwen3.5-122b-heretic): launching it replaces the resident trio.
+        family: "qwen3.5",
+        baseURL: "http://10.8.0.22:8000/v1",
+        model: "happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound",
+        contextWindow: 196608,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+      },
+      glm: {
+        // GLM-4.5-Air — heavy solo recipe, replaces the resident trio.
+        family: "glm4.5",
+        baseURL: "http://10.8.0.22:8001/v1",
+        model: "glm-4.5-air",
+        contextWindow: 131072,
+        temperature: 0.6,
+        topP: 0.95,
+        topK: 40,
       },
     }),
   compactThreshold: z.number().min(0.3).max(0.95).default(0.7),

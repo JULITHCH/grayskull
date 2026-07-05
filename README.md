@@ -21,6 +21,15 @@ blueprint gating, sub-agent fan-out, user-composable thinking chains, image inpu
 scheduled unattended workers, a per-session shell in the web UI, a matrix-style web
 UI with zen mode, and aggressive context hygiene.
 
+![The control room — live sessions, agent mesh, memory activation graph, workers](docs/img/control-room.png)
+
+**Start with the web UI.** `grayskull-web` is the intended cockpit: every session, the
+agent mesh, the memory graph, chains, workers, a real shell per project — one browser
+tab. The terminal client is fully capable and great over SSH, but it also auto-joins a
+running web hub, so the honest answer is: run both, look at the web.
+
+![Zen mode — memory ocean + the cognition core assembling one puzzle piece per step](docs/img/zen-cube.png)
+
 ## What makes GRAYSKULL different
 
 Most agent CLIs are thin wrappers around a frontier model — the model is smart, the
@@ -71,47 +80,80 @@ One TypeScript codebase, one Bun binary, no cloud, no telemetry, no subscription
 
 ## Quick start
 
-```sh
-grayskull                  # launcher in ~/.local/bin — run it in any project directory
-```
-
-or manually:
+**Recommended: the web UI.** One always-on hub, every session in the browser:
 
 ```sh
 export LMSTUDIO_API_KEY=whatever   # vLLM usually accepts anything
-bun run src/index.tsx              # bun lives in ~/.bun/bin
+grayskull-web                      # or: bun run web  →  http://localhost:4242
 ```
 
-Build a standalone binary (no bun needed at runtime): `bun run build` → `dist/grayskull`.
+Open the page, hit **+ PROJECT**, point it at a directory — full agent with memory,
+MCP, permissions, chains, its own shell (⌨ TERM). Everything below in this README
+works from there. See [Web UI](#web-ui--grayskull-web) for the tour.
+
+The terminal client for SSH / tmux life:
+
+```sh
+grayskull                  # launcher in ~/.local/bin — run it in any project directory
+bun run src/index.tsx      # or manually (bun lives in ~/.bun/bin)
+```
+
+It auto-joins a running grayskull-web hub, so browser and terminal mirror each other.
+Build standalone binaries (no bun at runtime): `bun run build` → `dist/grayskull`,
+`bun run build:web` → `dist/grayskull-web`.
 
 First useful thing to type: `/init` — it explores the project, asks you 2-3 questions,
 and seeds the project memory.
 
-### Recommended vLLM server flags (on the Spark)
+### Reference deployment: three models resident, systemd-managed (DGX Spark)
 
-Models run on their own ports (8000 = Qwen3.5-122B, 8001 = GLM-4.5-Air, 8002 = Qwen3.6),
-one loaded at a time; grayskull's `/model` presets point at each. Example for the
-Qwen3.5-122B-heretic recipe:
+The reference stack runs **three vLLM containers concurrently** — the GPU memory is
+split so all of them stay resident and `/model` switches instantly, no load wait:
 
-```sh
-vllm serve happypatrick/Qwen3.5-122B-A10B-heretic-int4-AutoRound \
-  --enable-prefix-caching \
-  --enable-auto-tool-choice --tool-call-parser qwen3_xml \
-  --reasoning-parser qwen3 \
-  --chat-template unsloth.jinja \
-  --max-model-len 196608
+| port | service | model | ctx | tool parser | gpu-mem |
+|---|---|---|---|---|---|
+| 8000 | `qwen-vllm` | Qwen3.6-35B-A3B-NVFP4 (main) | 262144 | `qwen3_xml` | 0.21 |
+| 8001 | `vllm-llama` | Llama-3.1-8B-Instruct-NVFP4 | 131072 | `llama3_json` | 0.20 |
+| 8002 | `vllm-nemo` | Nemotron-Nano-9B-v2-NVFP4 | 8192 | `qwen3_xml` | 0.16 |
+
+Each is a systemd unit wrapping `docker run` on `vllm/vllm-openai:nightly-aarch64`
+(`Restart=always`, HF cache bind-mounted, `HF_TOKEN` from `/etc/vllm/vllm.env`).
+The main Qwen3.6 unit, trimmed to the interesting flags:
+
+```ini
+[Service]
+ExecStart=/usr/bin/docker run --rm --name qwen-vllm \
+  --gpus all -p 8000:8000 \
+  vllm/vllm-openai:nightly-aarch64 \
+  nvidia/Qwen3.6-35B-A3B-NVFP4 \
+  --host 0.0.0.0 --port 8000 \
+  --kv-cache-dtype fp8 \
+  --attention-backend flashinfer --moe-backend marlin \
+  --gpu-memory-utilization 0.21 \
+  --max-model-len 262144 --max-num-seqs 4 --max-num-batched-tokens 8192 \
+  --enable-chunked-prefill --async-scheduling --enable-prefix-caching \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}' \
+  --load-format fastsafetensors \
+  --reasoning-parser qwen3 --tool-call-parser qwen3_xml --enable-auto-tool-choice
 ```
 
-Canonical launch is the spark-vllm-docker `qwen3.5-122b-heretic` recipe (`--solo` mode),
-which adds the infra flags: `--load-format fastsafetensors`,
-`--gpu-memory-utilization 0.76`, `-tp 1`, `--max-num-batched-tokens 8192`,
-`--trust-remote-code`.
+The heavier one-at-a-time models (Qwen3.5-122B-heretic, GLM-4.5-Air) still exist as
+spark-vllm-docker recipes — launching one replaces the resident trio, and their
+`/model` presets are kept in settings for exactly that.
 
-`--enable-prefix-caching` matters: grayskull keeps the system prompt + memory as a stable
-prefix, so every turn after the first reuses the KV cache. `--reasoning-parser qwen3`
-splits think-blocks into a separate stream — grayskull renders them dimmed and never
-parses tool calls out of them; thinking is off by default (`"enableThinking": false`
-in settings flips it via `chat_template_kwargs`, or toggle it live with `/thinking`).
+Flag notes, whatever backend you run:
+
+- `--enable-prefix-caching` matters most: grayskull keeps system prompt + memory as a
+  stable prefix, so every turn after the first reuses the KV cache.
+- `--reasoning-parser qwen3` splits think-blocks into a separate stream — grayskull
+  renders them dimmed and never parses tool calls out of them; thinking is off by
+  default (`"enableThinking": false` flips it via `chat_template_kwargs`, or `/thinking`
+  live).
+- `--tool-call-parser` must match the model family (`qwen3_xml` for Qwen-likes,
+  `llama3_json` for Llama) — grayskull's leak recovery handles the stragglers either
+  way, but the parser does the bulk of the work.
+- MTP speculative decoding (`--speculative-config`) is transparent to grayskull;
+  on this build `reasoning_content` stays empty and answers arrive in `content`.
 
 ---
 
@@ -462,17 +504,18 @@ presets**, and the recorded vLLM **parser flags**. The thinking toggle
 (`chat_template_kwargs.enable_thinking`) is the same on both families.
 
 - `qwen3.5` (default family) — leak dialect `qwen` (JSON `<tool_call>`/```json), parsers
-  `qwen3_xml` / `qwen3`. Used by both **Qwen3.6-35B-A3B** (the default endpoint, `:8002`)
-  and Qwen3.5-122B (`:8000`) — Qwen3.6 reuses this profile.
+  `qwen3_xml` / `qwen3`. Used by **Qwen3.6-35B-A3B** (the default, `:8000`) and the
+  Llama/Nemotron utility models — anything JSON-leaking reuses this profile.
 - `glm4.5` — leak dialect `glm` (GLM's `<tool_call>name<arg_key>/<arg_value></tool_call>`
   XML), parsers `glm45` / `glm45`.
 
 **Switch the whole stack live with `/model`** — no restart. Named presets live under
-`models` in settings (seeded with `qwen35`, `qwen36` and `glm`); `/model` lists them, `/model glm`
-copies that preset's family, endpoint, model id, context window and sampling into the
-active config and rebuilds the client connection (leak dialect and chain presets follow
-the family, sub-agents included). History is kept across a switch; `/clear` to reset.
-Add your own presets by editing `models` via `/settings`.
+`models` in settings (seeded with the resident trio `qwen36-nvfp4`, `llama-8b`,
+`nemotron-9b` plus the solo recipes `qwen35`, `glm`); `/model` lists them, `/model
+llama-8b` copies that preset's family, endpoint, model id, context window and sampling
+into the active config and rebuilds the client connection (leak dialect and chain
+presets follow the family, sub-agents included). History is kept across a switch;
+`/clear` to reset. Add and edit presets in `/setup`, or under `models` in settings.
 
 This emulates "two models" from GLM-4.5-Air's hybrid reasoning: codegen steps run
 thinking-OFF, plan/diagnose/test run thinking-ON. See `glm-server-notes.md` for the
@@ -494,7 +537,9 @@ grayskull-web          # serves on http://0.0.0.0:4242  (grayskull-web <port> to
 ```
 
 Matrix-style control room in the browser (single self-contained page, Bun-native
-WebSockets, zero frontend build):
+WebSockets, zero frontend build). This is the recommended way to drive GRAYSKULL:
+
+![Per-session terminal drawer — a real shell in the project folder](docs/img/terminal.png)
 
 - **multiple live sessions** — left panel; each runs a full agent (own cwd, settings,
   memory, MCP, permissions), create more with + NEW SESSION
@@ -520,6 +565,9 @@ WebSockets, zero frontend build):
   (0–2, applies to the next model request, works for CLI-linked sessions too).
   While you drag, a tooltip above the slider explains the behavior at that value:
   deterministic → focused → balanced (Qwen preset 0.7) → creative → wild
+- **⌨ TERM — a real terminal per session** (ctrl+\`): a PTY shell spawned in the
+  session's project folder, xterm.js drawer above the prompt. Survives hide/reopen
+  (scrollback replays), esc stays in the shell (vim-safe), dies with its session
 - **slash commands work in web sessions** too (`/tc`, `/memory`, `/compact`, …);
   editor/picker commands stay terminal-only
 - permission and ask_user requests pop as modals (y/a/n keys work)
@@ -530,7 +578,10 @@ WebSockets, zero frontend build):
   to zoom). An ambient space track fades in, and the live turn ghosts
   half-transparent over the ocean — thinking (dim italic), the streaming answer
   and the currently running tool call, bottom-anchored with older lines fading
-  out. Watch it work from across the room. esc returns.
+  out. Top right, the **cognition core**: a SOMA puzzle cube that assembles itself
+  while the model works — the current piece hovers and cycles orientations, every
+  completed tool step snaps it in, seven steps seal a core and the next begins.
+  Watch it work from across the room. esc returns.
 - digital rain + CRT scanlines, session replay on reconnect, esc interrupts
 
 **CLI sessions join the hub.** Every terminal `grayskull` automatically connects to a
