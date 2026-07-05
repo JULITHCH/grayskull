@@ -147,7 +147,16 @@ tool calls.
   `setup_family_add`, `modelsdev_search`, `modelsdev_import` WS messages.
   Opened through `CommandContext.openSetup` (set by both TUI App and WebSession).
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
-  via `with {type:"text"}`; `session.ts` WebSession wraps GrayskullAgent with a WS
+  via `with {type:"text"}`. `auth.ts` — login for exposed interfaces: argon2id
+  password (`grayskull-web --set-password`, hash in settings `web.passwordHash`;
+  none = auth off + startup warning), HMAC-signed expiry cookie (secret at
+  ~/.config/grayskull/web-secret, survives restarts), per-IP login rate limit,
+  /logout (also in the ⌘K palette). Gated: everything incl. /ws upgrade except
+  /login, PWA manifest/icons, and /cli (loopback-only — keep it unproxied
+  behind a same-host reverse proxy). Login page = CSS 3D cube: flies in with
+  GRAYSKULL on the front, flips to the form on its back (failed attempt skips
+  the intro and shakes; reduced-motion gets the form directly).
+  `session.ts` WebSession wraps GrayskullAgent with a WS
   bridge (per-session registry/MCP/memory/perms, transcript replay, pending perm/ask
   maps). Agent-mesh events come from the `monitor` callback in `agents/runner.ts`.
   Frontend is one self-contained ui.html (vanilla JS, matrix rain, SVG node graph).

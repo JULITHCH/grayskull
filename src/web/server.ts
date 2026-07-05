@@ -21,6 +21,10 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { runWorker } from "../workers/runtime";
 import { CHATS_CWD } from "./persist";
+import {
+  loadOrCreateSecret, makeToken, checkToken, cookieValue, authCookie, clearCookie,
+  isHttps, isLoopback, loginPage, LoginLimiter, COOKIE_NAME,
+} from "./auth";
 import { LlmClient } from "../llm/client";
 import type { TranscriptItem } from "../types";
 
@@ -360,14 +364,78 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
     }
   };
 
+  // ── login (web/auth.ts): everything except /login, the PWA manifest/icons
+  // and the loopback-only /cli endpoint requires the auth cookie ──
+  const authSettings = loadSettings(opts.defaultCwd).web;
+  const authOn = !!authSettings.passwordHash;
+  const secret = loadOrCreateSecret();
+  const limiter = new LoginLimiter();
+  if (!authOn && opts.hostname !== "127.0.0.1" && opts.hostname !== "localhost") {
+    console.warn(
+      "⚠ grayskull-web has NO login password and binds " + opts.hostname +
+      " — anyone who reaches this port controls a shell-wielding agent." +
+      " Set one: grayskull-web --set-password",
+    );
+  }
+  const authed = (req: Request): boolean =>
+    !authOn || checkToken(secret, cookieValue(req, COOKIE_NAME));
+
   const server = Bun.serve<WsData, never>({
     port: opts.port,
     hostname: opts.hostname,
-    fetch(req, srv) {
+    async fetch(req, srv) {
       const url = new URL(req.url);
-      if (url.pathname === "/ws" || url.pathname === "/cli") {
-        const kind = url.pathname === "/cli" ? "cli" : "browser";
-        if (srv.upgrade(req, { data: { id: ++wsCounter, kind } })) return undefined as unknown as Response;
+      if (url.pathname === "/cli") {
+        // TUI bridge: local process, no browser, no cookie — loopback only.
+        if (!isLoopback(srv.requestIP(req)?.address)) return new Response("forbidden", { status: 403 });
+        if (srv.upgrade(req, { data: { id: ++wsCounter, kind: "cli" } })) return undefined as unknown as Response;
+        return new Response("upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/login" && req.method === "POST") {
+        if (!authOn) return Response.redirect("/", 302);
+        const ip = srv.requestIP(req)?.address ?? "?";
+        if (!limiter.allowed(ip)) {
+          return new Response(loginPage("too many attempts — wait a few minutes"), {
+            status: 429, headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        }
+        const body = await req.text().catch(() => "");
+        const password = new URLSearchParams(body).get("password") ?? "";
+        const ok = password && (await Bun.password.verify(password, authSettings.passwordHash!).catch(() => false));
+        if (!ok) {
+          return new Response(loginPage("wrong password"), {
+            status: 401, headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        }
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "/",
+            "set-cookie": authCookie(makeToken(secret, authSettings.sessionDays), authSettings.sessionDays, isHttps(req)),
+          },
+        });
+      }
+      if (url.pathname === "/logout") {
+        return new Response(null, { status: 302, headers: { location: "/", "set-cookie": clearCookie() } });
+      }
+      // PWA metadata stays public (name + icons only) so the installed app
+      // can boot to the login page
+      if (url.pathname === "/manifest.json")
+        return new Response(MANIFEST, { headers: { "content-type": "application/manifest+json" } });
+      if (url.pathname === "/icon-192.png")
+        return new Response(Bun.file(icon192Path), { headers: { "content-type": "image/png" } });
+      if (url.pathname === "/icon-512.png")
+        return new Response(Bun.file(icon512Path), { headers: { "content-type": "image/png" } });
+      if (!authed(req)) {
+        if (url.pathname === "/" || url.pathname === "/login") {
+          return new Response(loginPage(), {
+            status: 401, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+          });
+        }
+        return new Response("unauthorized", { status: 401 });
+      }
+      if (url.pathname === "/ws") {
+        if (srv.upgrade(req, { data: { id: ++wsCounter, kind: "browser" } })) return undefined as unknown as Response;
         return new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/zen.mp3") {
@@ -379,14 +447,8 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         return new Response(xtermFitRaw as unknown as string, { headers: { "content-type": "text/javascript" } });
       if (url.pathname === "/xterm.css")
         return new Response(xtermCssRaw as unknown as string, { headers: { "content-type": "text/css" } });
-      if (url.pathname === "/manifest.json")
-        return new Response(MANIFEST, { headers: { "content-type": "application/manifest+json" } });
       if (url.pathname === "/sw.js")
         return new Response(SW_JS, { headers: { "content-type": "text/javascript" } });
-      if (url.pathname === "/icon-192.png")
-        return new Response(Bun.file(icon192Path), { headers: { "content-type": "image/png" } });
-      if (url.pathname === "/icon-512.png")
-        return new Response(Bun.file(icon512Path), { headers: { "content-type": "image/png" } });
       return new Response(indexHtml, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });

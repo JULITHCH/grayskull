@@ -2423,6 +2423,7 @@ function palActions() {
   for (const [c, d] of SLASH_COMMANDS) acts.push({ k: "command", label: `${c} — ${d}`, run: () => { $("promptInput").value = c + " "; $("promptInput").focus(); } });
   acts.push({ k: "action", label: "◱ zen — memory ocean (ctrl+.)", run: () => toggleZen() });
   acts.push({ k: "action", label: "⌨ terminal — shell in the project folder (ctrl+`)", run: () => termToggle() });
+  acts.push({ k: "action", label: "⏻ logout — end this browser's login", run: () => { location.href = "/logout"; } });
   acts.push({ k: "auto", label: "⚙ + new worker (agent builds it)", run: openNewWorker });
   acts.push({ k: "auto", label: "⚙ + new job (schedule a worker)", run: () => $("newJobBtn").onclick() });
   for (const w of S.auto.workers) acts.push({ k: "auto", label: `⚙ run worker: ${w.name}`, run: () => openWorkerRun(w.name) });

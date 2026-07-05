@@ -260,6 +260,17 @@ export const SettingsSchema = z.object({
     .default([]),
   /** extra working directories surfaced to the model (CLI --add-dir adds more) */
   addDirs: z.array(z.string()).default([]),
+  /** grayskull-web login (web/auth.ts). No passwordHash = auth OFF (trusted
+   *  network); set one with `grayskull-web --set-password` before exposing
+   *  the interface. */
+  web: z
+    .object({
+      /** argon2id hash from Bun.password.hash — never the plain password */
+      passwordHash: z.string().optional(),
+      /** login cookie lifetime */
+      sessionDays: z.number().min(0.01).default(30),
+    })
+    .default({ sessionDays: 30 }),
   /** checkpoint/rewind: snapshot files before every edit-kind tool so /rewind
    *  can restore them (see agent/checkpoints.ts) */
   checkpoints: z
