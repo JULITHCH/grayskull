@@ -89,6 +89,11 @@ body {
   transition: background .4s;
 }
 #backdrop { position: fixed; inset: 0; z-index: 0; }
+/* ◮ 3D toggle: kill every animation — backdrop canvas, CRT scanlines, and
+ * all CSS animations/transitions (spinners keep their final frame) */
+body.nofx #backdrop { display: none; }
+body.nofx::after { display: none !important; }
+.nofx *, .nofx *::before, .nofx *::after { animation: none !important; transition: none !important; }
 /* zen: hide the whole GUI, leave only the backdrop (memory ocean) */
 #app { transition: opacity .6s; }
 body.zen #app { opacity: 0; pointer-events: none; }
@@ -651,6 +656,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     <div style="flex:1"></div>
     <div class="chip" id="setupBtn" title="settings — model, presets, families, behavior, services">⚙</div>
     <div class="chip" id="notifBtn" title="desktop notifications when grayskull asks something back (needs localhost or https)">🔕</div>
+    <div class="chip" id="fxBtn" title="toggle all animations & 3D effects (backdrop, scanlines, transitions)">◮ 3D</div>
     <div class="chip" id="zenBtn" title="hide the UI — watch the memory ocean (ctrl+.)">◱ ZEN</div>
     <div class="chip" id="paletteBtn" title="command palette (ctrl+k)">⌘K</div>
     <select id="themeSel" title="theme">
@@ -689,6 +695,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
       <button onclick="mGo('chat');termToggle(true)">⌨ Terminal</button>
       <div class="dvh">SYSTEM</div>
       <button onclick="toggleZen();closeDrawer()">◱ Zen ocean</button>
+      <button onclick="toggleFx()">◮ 3D effects on/off</button>
       <button onclick="$('setupBtn').click();closeDrawer()">⚙ Settings</button>
       <button onclick="location.href='/logout'">⏻ Logout</button>
     </nav>
@@ -952,6 +959,8 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 /* ═══════════ state + utils ═══════════ */
 const S = {
   ws: null, sessions: [], current: null, defaultCwd: "",
+  // ◮ 3D toggle: all animations (backdrop, scanlines, transitions, zen cube)
+  fx: (() => { try { return localStorage.getItem("gs_fx") !== "off"; } catch { return true; } })(),
   transcripts: {},   // sid -> array of rendered item HTML
   streams: {},       // sid -> {text, reason}
   status: {},        // sid -> status msg
@@ -1076,7 +1085,7 @@ function mem3dCoords(h) {
 }
 function bdFrame() {
   const c = bd.canvas, ctx = bd.ctx;
-  if (!c || document.hidden) return;
+  if (!c || document.hidden || !S.fx) return;
   bd.t++;
   const theme = document.documentElement.dataset.theme;
   const acc = cssVar("--g") || "#00ff66";
@@ -1928,6 +1937,26 @@ function toggleZen(on) {
 }
 $("zenBtn").onclick = () => toggleZen();
 
+/* ◮ 3D: master switch for animations & effects. Default on; persisted. */
+function applyFx() {
+  document.body.classList.toggle("nofx", !S.fx);
+  const b = $("fxBtn");
+  b.textContent = S.fx ? "◮ 3D" : "◮ 3D OFF";
+  b.style.opacity = S.fx ? "" : ".55";
+  if (!S.fx) {
+    bd.ctx?.clearRect(0, 0, bd.canvas.width, bd.canvas.height);
+    zcStop();
+  } else if (document.body.classList.contains("zen")) {
+    zcStart();
+  }
+}
+function toggleFx() {
+  S.fx = !S.fx;
+  try { localStorage.setItem("gs_fx", S.fx ? "on" : "off"); } catch {}
+  applyFx();
+}
+$("fxBtn").onclick = toggleFx;
+
 /* ═══════════ per-session terminal: PTY on the server, xterm.js here.
  * One shell per session, spawned lazily in the session's project folder;
  * survives panel toggles and reconnects (server replays its buffer). ═══════ */
@@ -2072,7 +2101,7 @@ function zcStep(sid) {
   ZC.snapT = 1;
   if (n % 7 === 0) ZC.flashT = 1;
 }
-function zcStart() { if (!ZC.raf) ZC.raf = requestAnimationFrame(zcFrame); }
+function zcStart() { if (!ZC.raf && S.fx) ZC.raf = requestAnimationFrame(zcFrame); }
 function zcStop() { cancelAnimationFrame(ZC.raf); ZC.raf = 0; }
 /* rotate a piece's cells k×90° around the vertical axis through its centroid —
  * the hologram cycles these while "trying" the fit */
@@ -3274,6 +3303,7 @@ function renderAll() { renderItems(); renderLive(); renderStatus(); renderMemory
 setInterval(() => { $("clockChip").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
 setTheme((() => { try { return localStorage.getItem("gs_theme") || "matrix"; } catch { return "matrix"; } })());
 bdInit();
+applyFx();
 // restore the prompt draft saved across an auto-update reload
 try {
   if (sessionStorage.gsDraft) {
