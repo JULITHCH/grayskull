@@ -225,7 +225,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .xterm .xterm-viewport { background: transparent !important; }
 .item { margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
 .item.user { color: var(--user); border-left: 2px solid var(--user); padding-left: 8px; }
-.msg-img { max-width: 320px; max-height: 240px; margin-top: 4px; border: 1px solid var(--g-faint); }
+.msg-img { width: 100%; height: auto; margin-top: 4px; border: 1px solid var(--g-faint); }
 .item.assistant { color: var(--fg); }
 .item.note { color: var(--g-dim); font-size: 12px; }
 .item.banner { color: var(--amber); font-weight: 700; text-shadow: 0 0 8px rgba(255,170,0,.4); }
@@ -320,6 +320,14 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 .modeBtn { font-size: 10px; padding: 2px 7px; border: 1px solid var(--g-faint); cursor: pointer; color: var(--g-dim); }
 .modeBtn.active { color: var(--g); border-color: var(--g); text-shadow: 0 0 6px var(--g); }
 .modeBtn.kami.active { color: var(--red); border-color: var(--red); text-shadow: 0 0 8px var(--red); }
+/* empty state: no active session — centered new-chat / new-project, composer + mode row hidden */
+#noSess { display: none; }
+body.nosess #noSess { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+body.nosess #transcript, body.nosess #inputBar, body.nosess #statusBar, body.nosess #attachments { display: none !important; }
+#noSess .nsHead { color: var(--g-dim); letter-spacing: 4px; margin-bottom: 8px; }
+#noSess button { font: inherit; font-size: 13px; background: none; color: var(--g); border: 1px solid var(--g-faint);
+  padding: 12px 0; width: 240px; cursor: pointer; letter-spacing: 1px; }
+#noSess button:hover { border-color: var(--g); text-shadow: 0 0 6px var(--g); }
 #ctxBar { width: 110px; height: 8px; border: 1px solid var(--g-faint); position: relative; }
 #ctxFill { height: 100%; background: var(--g-dim); width: 0%; transition: width .5s; }
 
@@ -593,7 +601,6 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   .item.user { background: var(--sel); border: none; border-radius: 15px 15px 4px 15px;
     padding: 10px 13px; margin-left: auto; width: fit-content; max-width: 86%; }
   .item.assistant { padding: 0 2px; }
-  .msg-img { max-width: 70vw; }
 
   /* ── composer: rounded field + round send button ── */
   #inputBar { flex: 0 0 auto; border: none; border-top: 1px solid var(--g-faint);
@@ -627,7 +634,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 }
 </style>
 </head>
-<body>
+<body class="nosess">
 <canvas id="backdrop"></canvas>
 <div id="boot">▮ GRAYSKULL SYSTEMS ONLINE</div>
 <div id="app">
@@ -686,6 +693,11 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 
   <div class="panel" id="main">
     <div id="transcript"><div id="items"></div><div id="live"></div></div>
+    <div id="noSess">
+      <div class="nsHead">NO ACTIVE SESSION</div>
+      <button onclick="$('newChat').onclick()">+ NEW CHAT</button>
+      <button onclick="$('newSess').onclick()">+ NEW PROJECT</button>
+    </div>
     <div id="scrollPill">▼ new output</div>
     <div id="termPanel">
       <div id="termHead"><span>⌨ TERMINAL</span><span class="tcwd" id="termCwd"></span>
@@ -826,6 +838,16 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     <div style="flex:1"></div>
     <button class="btn" onclick="setupSave()">SAVE</button>
     <button class="btn" onclick="closeModal('setupModalBg')">CLOSE</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="skillsModalBg"><div class="modal" style="width:min(760px,94vw)">
+  <h3>⚡ SKILL HUB</h3>
+  <div class="body jobForm" id="skillsBody" style="white-space:normal"></div>
+  <div class="actions">
+    <span id="skillsFoot" style="color:var(--g-dim);font-size:11px;align-self:center"></span>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('skillsModalBg')">CLOSE</button>
   </div>
 </div></div>
 
@@ -1256,6 +1278,33 @@ function handle(m) {
         renderSetup();
       }
       break;
+    case "skills_data":
+      if (m.sid === S.current) {
+        SKILLS.checking = !!m.checking;
+        if (m.checking) { SKILLS.q = m.query || ""; SKILLS.detail = null; SKILLS.detailBusy = false; }
+        if (!m.checking) {
+          SKILLS.total = m.total ?? 0; SKILLS.repos = m.repos ?? []; SKILLS.errors = m.errors ?? [];
+          SKILLS.hits = m.hits ?? []; SKILLS.busy = false;
+        }
+        renderSkills(); $("skillsModalBg").classList.add("open");
+        if (!m.checking) { const inp = $("skillsQuery"); if (inp) inp.focus(); }
+      }
+      break;
+    case "skills_results":
+      if (m.sid === S.current && m.query === SKILLS.q.trim()) {
+        SKILLS.hits = m.hits ?? []; SKILLS.busy = false; renderSkills();
+      }
+      break;
+    case "skills_detail":
+      if (m.sid === S.current) { SKILLS.detail = m.detail; SKILLS.detailBusy = false; renderSkills(); }
+      break;
+    case "skills_installed":
+      if (m.sid === S.current) {
+        SKILLS.installed[m.name] = m.scope;
+        toast(`⚡ installed "${m.name}" (${m.scope}) — invoke with /${m.name}`);
+        renderSkills();
+      }
+      break;
     case "chain_edit": if (!m.sid || m.sid === S.current) openChainEditor(m); break;
     case "chain_saved": closeModal("chainModalBg"); break;
     case "chain_error": toast(m.message || "chain save failed"); break;
@@ -1297,6 +1346,8 @@ function renderSessions() {
         <span class="ctxMini" title="context fill"><i style="width:${st.ctxPct ?? 0}%"></i></span>
       </div></div>`;
   }).join("");
+  const cur = S.sessions.find((s) => s.sid === S.current);
+  document.body.classList.toggle("nosess", !cur || !!cur.dormant);
 }
 function selectSession(sid) { S.current = sid; S.openTools.clear(); renderSessions(); renderAll(); bdBuildMemory(); if ($("termPanel").classList.contains("open")) termShow(); }
 function resumeSession(sid) { S.current = sid; send({ t: "resume_session", sid }); }
@@ -1848,6 +1899,9 @@ addEventListener("keydown", (e) => {
 });
 
 /* ═══════════ zen: hide the GUI, float in the memory ocean ═══════════ */
+/* everything stays live while a session generates — views, zen, palette,
+ * settings. Sessions are event-driven by sid; a running turn keeps streaming
+ * no matter what the UI shows. */
 function toggleZen(on) {
   const zen = on ?? !document.body.classList.contains("zen");
   document.body.classList.toggle("zen", zen);
@@ -2555,7 +2609,8 @@ function renderPalette() {
 }
 function palRun(i) {
   const list = palFiltered();
-  if (list[i]) { closeModal("paletteBg"); list[i].run(); }
+  if (!list[i]) return;
+  closeModal("paletteBg"); list[i].run();
 }
 $("paletteBtn").onclick = openPalette;
 $("palInput").addEventListener("input", () => { palSel = 0; renderPalette(); });
@@ -2725,6 +2780,79 @@ $("setupBtn").onclick = () => {
   if (s.dormant) send({ t: "resume_session", sid: s.sid });
   send({ t: "setup_open", sid: s.sid });
 };
+
+/* ═══════════ skill hub modal (/skills browse) ═══════════ */
+const SKILLS = { q: "", hits: [], total: 0, repos: [], errors: [], busy: false, checking: false,
+  detail: null, detailBusy: false, installed: {} };
+let skillsTimer = null;
+function skillsInput(v) {
+  SKILLS.q = v;
+  clearTimeout(skillsTimer);
+  skillsTimer = setTimeout(() => {
+    SKILLS.busy = true;
+    send({ t: "skills_search", sid: S.current, query: SKILLS.q.trim() });
+  }, 180);
+}
+function skillsPreview(i) {
+  const h = SKILLS.hits[i];
+  if (!h) return;
+  SKILLS.detail = null; SKILLS.detailBusy = true;
+  renderSkills();
+  send({ t: "skills_detail", sid: S.current, skill: h });
+}
+function skillsInstall(i, scope) {
+  const skill = i >= 0 ? SKILLS.hits[i] : SKILLS.detail;
+  if (!skill) return;
+  toast(`installing "${skill.name}"…`);
+  send({ t: "skills_install", sid: S.current, skill: { name: skill.name, path: skill.path, repo: skill.repo, ref: skill.ref, source: skill.source }, scope });
+}
+function renderSkills() {
+  if (SKILLS.checking) {
+    $("skillsBody").innerHTML = `<div style="color:var(--g-dim);padding:12px 0">loading skill databases…</div>`;
+    $("skillsFoot").textContent = "";
+    return;
+  }
+  const d = SKILLS.detail;
+  const detailHtml = SKILLS.detailBusy
+    ? `<div style="color:var(--g-dim);padding:6px 0">fetching SKILL.md…</div>`
+    : d
+    ? `<div style="border:1px solid var(--g-dim);border-radius:4px;padding:8px;margin-top:8px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <b style="color:var(--g)">${esc(d.name)}</b>
+          <span style="color:var(--g-dim);font-size:11px">[${esc(d.source)}] ${esc(d.repo)}/${esc(d.path)} · ${d.files.length} file${d.files.length === 1 ? "" : "s"}</span>
+          <div style="flex:1"></div>
+          <button class="btn" style="font-size:10px;padding:1px 8px" onclick="skillsInstall(-1,'local')">⚡ INSTALL (PROJECT)</button>
+          <button class="btn" style="font-size:10px;padding:1px 8px" onclick="skillsInstall(-1,'global')">🌐 GLOBAL</button>
+          <button class="btn" style="font-size:10px;padding:1px 8px" onclick="SKILLS.detail=null;renderSkills()">✕</button>
+        </div>
+        <div style="margin-top:4px">${esc(d.description || "(no description)")}</div>
+        <pre style="max-height:220px;overflow:auto;color:var(--g-dim);font-size:11px;margin:6px 0 0;white-space:pre-wrap">${esc(d.body.split("\n").slice(0, 60).join("\n"))}${d.body.split("\n").length > 60 ? "\n…" : ""}</pre>
+      </div>`
+    : "";
+  const rows = SKILLS.busy
+    ? `<div style="color:var(--g-dim);padding:6px 0">searching…</div>`
+    : !SKILLS.hits.length
+    ? `<div style="color:var(--g-dim);padding:6px 0">no skill matches "${esc(SKILLS.q)}"</div>`
+    : SKILLS.hits.map((h, i) => `
+      <div class="mdRow">
+        <span class="ref" style="cursor:pointer" title="${escA(h.repo + "/" + h.path)}" onclick="skillsPreview(${i})">${esc(h.name)}</span>
+        <span class="meta">[${esc(h.source)}]${SKILLS.installed[h.name] ? ` · <span style="color:var(--g)">installed (${esc(SKILLS.installed[h.name])})</span>` : ""}</span>
+        <button class="btn" style="font-size:10px;padding:1px 8px" onclick="skillsPreview(${i})">👁 PREVIEW</button>
+        <button class="btn" style="font-size:10px;padding:1px 8px" onclick="skillsInstall(${i},'local')" title="install into <project>/.grayskull/skills">⚡ INSTALL</button>
+      </div>`).join("");
+  $("skillsBody").innerHTML = `
+    <div style="color:var(--g-dim);font-size:11px;margin-bottom:6px">one search box across every configured skill database — configure sources via the <b>skillRepos</b> setting (/skills repos). Install drops the skill into the project; it is invocable as /&lt;name&gt; immediately.</div>
+    <div style="display:flex;gap:8px;margin-bottom:6px">
+      <input id="skillsQuery" style="flex:1" placeholder="search ${SKILLS.total} skills — e.g. pdf · react · security" value="${escA(SKILLS.q)}"
+        oninput="skillsInput(this.value)" onkeydown="if(event.key==='Enter'){clearTimeout(skillsTimer);SKILLS.busy=true;send({t:'skills_search',sid:S.current,query:SKILLS.q.trim()});renderSkills()}">
+    </div>
+    ${detailHtml}
+    ${rows}
+    ${SKILLS.errors.map((e) => `<div style="color:var(--amber);font-size:11px">⚠ ${esc(e)}</div>`).join("")}`;
+  $("skillsFoot").textContent = `${SKILLS.total} skills · ${SKILLS.repos.filter((r) => !r.disabled).length} databases · /skills new <name> creates your own`;
+  const inp = $("skillsQuery");
+  if (inp && document.activeElement !== inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
 
 /* ═══════════ chain editor modal ═══════════ */
 function openChainEditor(m) {
