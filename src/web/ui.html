@@ -578,6 +578,15 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     font-family: inherit; font-size: 13px; padding: 10px 10px; cursor: pointer; border-radius: 8px; }
   .drawNav button:active { background: var(--sel); border-color: var(--g-faint); }
 
+  /* order inside #main: transcript fills, then the mode row ABOVE the composer
+     (iOS Safari's floating bottom toolbar covers the very bottom — keep the
+     mode buttons out of that zone), image chips hug the input, composer last */
+  #transcript { order: 0; }
+  #termPanel  { order: 0; }
+  #statusBar  { order: 1; }
+  #attachments{ order: 2; }
+  #inputBar   { order: 3; }
+
   /* ── chat: comfortable bubbles ── */
   #transcript { padding: 12px 12px 4px; }
   .item { margin: 10px 0; }
@@ -601,9 +610,9 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   body.generating #stopBtn { display: flex; }
   body.generating #sendBtn { display: none; }
 
-  /* ── status bar: slim, scrollable modes, drop desktop-only stats ── */
+  /* ── mode row: slim, scrollable, sits just above the composer ── */
   #statusBar { flex: 0 0 auto; gap: 8px; overflow-x: auto; scrollbar-width: none;
-    padding: 6px 10px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+    padding: 7px 10px; border-top: 1px solid var(--g-faint); border-bottom: none; }
   #statusBar::-webkit-scrollbar { display: none; }
   #modeBtns { flex: 0 0 auto; gap: 4px; }
   .modeBtn { font-size: 10px; padding: 7px 9px; }
@@ -3047,6 +3056,33 @@ function syncPlaceholder() { $("promptInput").placeholder = isMobile() ? "Messag
 addEventListener("resize", () => { if (!isMobile()) closeDrawer(); updateMTitle(); syncPlaceholder(); });
 updateMTitle();
 syncPlaceholder();
+
+// Edge-swipe to open/close the drawer — a reliable way in when iOS Safari's
+// chrome (expanded during generation) makes the ☰ hard to hit.
+(() => {
+  let sx = 0, sy = 0, tracking = false, mode = null; // mode: "open" | "close"
+  const EDGE = 26, THRESH = 48;
+  addEventListener("touchstart", (e) => {
+    if (!isMobile() || e.touches.length !== 1) return tracking = false;
+    // don't hijack swipes that start in the shell (xterm) or a modal
+    if (e.target.closest?.("#termPanel, .modal-bg.open")) return tracking = false;
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY;
+    const open = document.body.classList.contains("drawer");
+    if (!open && sx <= EDGE) { tracking = true; mode = "open"; }
+    else if (open) { tracking = true; mode = "close"; }
+    else tracking = false;
+  }, { passive: true });
+  addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) < THRESH || Math.abs(dy) > Math.abs(dx)) return; // mostly-vertical = scroll
+    if (mode === "open" && dx > 0) openDrawer();
+    else if (mode === "close" && dx < 0) closeDrawer();
+  }, { passive: true });
+})();
 
 /* ═══════════ misc + boot ═══════════ */
 function toast(text) { const t = $("toast"); t.textContent = "✗ " + text; t.style.display = "block"; setTimeout(() => t.style.display = "none", 5000); }
