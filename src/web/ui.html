@@ -1195,14 +1195,26 @@ addEventListener("wheel", (e) => {
 }, { passive: true });
 
 /* ═══════════ websocket ═══════════ */
+let reconnTimer = null;
 function connect() {
+  if (S.ws && S.ws.readyState <= 1) return; // already connecting/open
+  clearTimeout(reconnTimer);
   const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
   S.ws = ws;
   ws.onopen = () => { $("connChip").textContent = "● online"; $("connChip").style.color = "var(--g)"; };
-  ws.onclose = () => { $("connChip").textContent = "○ reconnecting…"; $("connChip").style.color = "var(--red)"; setTimeout(connect, 1500); };
+  ws.onclose = () => { $("connChip").textContent = "○ reconnecting…"; $("connChip").style.color = "var(--red)"; reconnTimer = setTimeout(connect, 1500); };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 }
-const send = (o) => S.ws?.readyState === 1 && S.ws.send(JSON.stringify(o));
+/* mobile browsers kill the socket when the tab backgrounds — without feedback
+ * every tap (close session, send, mode) would silently vanish until the 1.5s
+ * retry lands. Drop loudly and reconnect immediately instead. */
+let sendWarnAt = 0;
+const send = (o) => {
+  if (S.ws?.readyState === 1) return void S.ws.send(JSON.stringify(o));
+  connect();
+  if (Date.now() - sendWarnAt > 4000) { sendWarnAt = Date.now(); toast("connection lost — reconnecting, try again in a second"); }
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
 
 function handle(m) {
   switch (m.t) {
