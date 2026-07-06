@@ -95,7 +95,16 @@ tool calls.
   same-name defs); system prompt pushes proactive delegation.
 - `skills/` — Claude Code-compatible SKILL.md discovery (incl. ~/.claude/skills and the
   plugin cache); exposed as the `skill` tool + `/<name>` slash fallback. Frontmatter
-  parser handles YAML block scalars (`description: >`).
+  parser handles YAML block scalars (`description: >`). `skills/hub.ts` — remote skill
+  databases: GitHub repos of `<dir>/SKILL.md` skills, one tree-API request per repo
+  cached 24h (`~/.config/grayskull/skill-repos/`), bodies via raw.githubusercontent
+  (optional `GITHUB_TOKEN`). Five built-in sources (anthropic, superpowers, daymade,
+  tech-leads-club, antigravity ≈6k skills); `skillRepos` setting adds/overrides/disables
+  by name (merged in loadSettings like BUILTIN_MCP). `/skills browse [q]` opens the
+  search-box browser (TUI `ui/skillhub.tsx`, web `skills_*` WS messages + modal);
+  `find`/`install <source>/<name> [global]` work headless; `/skills new <name>
+  [global] [desc]` scaffolds into `.grayskull/skills/` (desc → returned prompt makes
+  the agent draft the SKILL.md body).
 - `chains/` — /thinkingchain step pipelines: registry.ts (global `~/.config/grayskull/chains/*.md`,
   `->` syntax, built-in step expansion table, gate detection via `review|test|verify`,
   per-step preset binding `stepPresetName`/`resolveStepProfile` + `profiles:` frontmatter

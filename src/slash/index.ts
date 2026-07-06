@@ -20,6 +20,13 @@ import {
 import { loadAgents, deleteAgentDef } from "../agents/registry";
 import { loadSkills, skillInvocation } from "../skills/registry";
 import {
+  searchHub,
+  fetchSkillDetail,
+  installSkill,
+  createSkill,
+  type InstallScope,
+} from "../skills/hub";
+import {
   loadChains,
   saveChain,
   deleteChain,
@@ -54,6 +61,8 @@ export interface CommandContext {
   clearTranscript: () => void;
   /** open the /setup dialog (Ink dialog in the TUI, modal in web sessions) */
   openSetup?: () => void;
+  /** open the remote skill browser (/skills browse), optionally pre-filled */
+  openSkillsBrowser?: (query?: string) => void;
   exit: () => void;
 }
 
@@ -456,17 +465,8 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "skills",
-    description: "list skills (SKILL.md, Claude Code compatible)",
-    run: async (ctx) => {
-      const skills = loadSkills(ctx.cwd);
-      if (skills.length === 0) {
-        return note(
-          ctx,
-          "no skills found. Searched: .grayskull/skills, ~/.config/grayskull/skills, .claude/skills, ~/.claude/skills — each skill is a <name>/SKILL.md with frontmatter. Invoke with /<name>.",
-        );
-      }
-      note(ctx, skills.map((s) => `/${s.name} [${s.source}] — ${s.description}`).join("\n"));
-    },
+    description: "skills: list · browse/find <query> (remote hub) · install <source>/<name> · new <name> · repos",
+    run: async (ctx, args) => runSkillsCommand(ctx, args),
   },
   {
     name: "resume",
@@ -552,6 +552,93 @@ export const COMMANDS: SlashCommand[] = [
     run: async (ctx) => ctx.exit(),
   },
 ];
+
+async function runSkillsCommand(ctx: CommandContext, args: string): Promise<CommandResult> {
+  const m = args.trim().match(/^(\S*)\s*([\s\S]*)$/);
+  const sub = m?.[1] ?? "";
+  const rest = (m?.[2] ?? "").trim();
+  const repos = ctx.settings.skillRepos;
+
+  if (sub === "repos") {
+    const lines = repos.map(
+      (r) =>
+        `  ${r.disabled ? "○" : "●"} ${r.name.padEnd(18)} ${r.repo}${r.subdir ? `  (${r.subdir})` : ""}`,
+    );
+    return note(
+      ctx,
+      `skill databases (settings key "skillRepos" — add {name, repo, subdir?} entries, same name overrides a built-in, disabled:true hides it):\n${lines.join("\n")}`,
+    );
+  }
+
+  if (sub === "browse" || sub === "find" || sub === "search") {
+    // browse prefers the interactive UI; find/search always print
+    if (sub === "browse" && ctx.openSkillsBrowser) {
+      ctx.openSkillsBrowser(rest || undefined);
+      return;
+    }
+    const errors: string[] = [];
+    const hits = await searchHub(repos, rest, 25, (repo, msg) => errors.push(`${repo}: ${msg}`));
+    const errText = errors.length ? `\n⚠ ${errors.join("\n⚠ ")}` : "";
+    if (hits.length === 0) return note(ctx, `no remote skills match "${rest}"${errText}`);
+    const lines = hits.map((h) => `  ${h.name.padEnd(34)} [${h.source}]`);
+    return note(
+      ctx,
+      `remote skills${rest ? ` matching "${rest}"` : ""} — install with /skills install <source>/<name> [global]:\n${lines.join("\n")}${errText}`,
+    );
+  }
+
+  if (sub === "install") {
+    const im = rest.match(/^(\S+?)\/(\S+?)(\s+(global|local))?$/);
+    if (!im) return note(ctx, "usage: /skills install <source>/<name> [global] — sources via /skills repos");
+    const [, source, name, , scopeArg] = im;
+    const scope: InstallScope = scopeArg === "global" ? "global" : "local";
+    const hits = await searchHub(repos.filter((r) => r.name === source), name!, 5);
+    const hit = hits.find((h) => h.name === name) ?? hits[0];
+    if (!hit) return note(ctx, `no skill "${name}" in source "${source}" — /skills find ${name} to search everywhere`);
+    try {
+      const detail = await fetchSkillDetail(hit, repos);
+      const { dir, fileCount } = await installSkill(detail, scope, ctx.cwd);
+      return note(
+        ctx,
+        `⚡ installed "${hit.name}" (${fileCount} file${fileCount === 1 ? "" : "s"}) → ${dir}\n${detail.description.slice(0, 300)}\nInvoke with /${hit.name} — active immediately.`,
+      );
+    } catch (err) {
+      return note(ctx, `install failed: ${(err as Error).message}`);
+    }
+  }
+
+  if (sub === "new") {
+    const nm = rest.match(/^(\S+)\s*(global\s+)?([\s\S]*)$/);
+    const name = nm?.[1] ?? "";
+    if (!name) return note(ctx, "usage: /skills new <name> [global] [description of what it should do]");
+    const scope: InstallScope = nm?.[2] ? "global" : "local";
+    const description = (nm?.[3] ?? "").trim();
+    let file: string;
+    try {
+      file = createSkill(name, description, scope, ctx.cwd);
+    } catch (err) {
+      return note(ctx, `create failed: ${(err as Error).message}`);
+    }
+    note(ctx, `⚡ scaffolded skill "${name}" → ${file}`);
+    if (!description) {
+      return note(ctx, `edit it with /settings-style editor or ask the model to draft it. Invoke with /${name}.`);
+    }
+    // let the agent draft the playbook body from the description
+    return {
+      prompt: `A new skill was scaffolded at ${file}. Its purpose: "${description}". Rewrite that file into a complete, high-quality SKILL.md: keep the YAML frontmatter (name: ${name}, plus a sharp one-line description of when to use it), then a concrete step-by-step playbook the agent follows when the skill is invoked. Be specific and actionable, no filler. Use the write/edit tool on exactly that path.`,
+    };
+  }
+
+  // default: list installed skills
+  const skills = loadSkills(ctx.cwd);
+  const listing = skills.length
+    ? skills.map((s) => `/${s.name} [${s.source}] — ${s.description}`).join("\n")
+    : "no skills installed. Searched: .grayskull/skills, ~/.config/grayskull/skills, .claude/skills, ~/.claude/skills — each skill is a <name>/SKILL.md with frontmatter.";
+  return note(
+    ctx,
+    `${listing}\n\n/skills browse [query] — search the skill databases · /skills new <name> [desc] — create your own · /skills repos — sources`,
+  );
+}
 
 async function runThinkingChain(ctx: CommandContext, args: string): Promise<CommandResult> {
   const m = args.trim().match(/^(\S*)\s*([\s\S]*)$/);

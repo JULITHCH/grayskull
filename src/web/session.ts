@@ -19,6 +19,13 @@ import { memoryGraphData } from "../memory/scores";
 import { runChain, chainState } from "../chains/runner";
 import { loadChains, saveChain, BUILTIN_STEPS } from "../chains/registry";
 import { loadSkills } from "../skills/registry";
+import {
+  loadHub,
+  rankSkills,
+  fetchSkillDetail,
+  installSkill,
+  type RemoteSkill,
+} from "../skills/hub";
 import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
 import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset, addFamily } from "../setup/core";
@@ -317,6 +324,7 @@ export class WebSession {
         this.send({ t: "replay", items: [] });
       },
       openSetup: () => void this.setupOpen(),
+      openSkillsBrowser: (query?: string) => void this.skillsOpen(query ?? ""),
       exit: () => note("sessions are closed from the browser, not /exit"),
     };
     try {
@@ -568,6 +576,82 @@ export class WebSession {
       });
     } catch (err) {
       this.send({ t: "error", text: `setup save failed: ${(err as Error).message}` });
+    }
+  }
+
+  // ── skill hub (/skills browse in the browser) ─────────────────────────
+
+  /** remote catalog cached per session — one tree fetch per repo per day */
+  private hubCatalog: RemoteSkill[] | null = null;
+  private hubErrors: string[] = [];
+
+  private async hubLoad(): Promise<RemoteSkill[]> {
+    if (this.hubCatalog) return this.hubCatalog;
+    this.hubErrors = [];
+    this.hubCatalog = await loadHub(this.settings.skillRepos, (repo, msg) =>
+      this.hubErrors.push(`${repo}: ${msg}`),
+    );
+    return this.hubCatalog;
+  }
+
+  /** Open the skill-hub modal: ack immediately (spinner), catalog when loaded. */
+  async skillsOpen(query = ""): Promise<void> {
+    this.send({ t: "skills_data", checking: true, query });
+    const all = await this.hubLoad();
+    this.send({
+      t: "skills_data",
+      checking: false,
+      query,
+      total: all.length,
+      repos: this.settings.skillRepos.map((r) => ({
+        name: r.name,
+        repo: r.repo,
+        disabled: !!r.disabled,
+      })),
+      errors: this.hubErrors,
+      hits: rankSkills(all, query, 100),
+    });
+  }
+
+  async skillsSearch(query: string): Promise<void> {
+    const all = await this.hubLoad();
+    this.send({ t: "skills_results", query, hits: rankSkills(all, query, 100) });
+  }
+
+  /** Client passes the hit back verbatim — no server-side hit registry. */
+  private asRemoteSkill(raw: unknown): RemoteSkill | null {
+    const o = raw as Record<string, unknown>;
+    if (!o || typeof o !== "object") return null;
+    const { name, path, repo, ref, source } = o;
+    if ([name, path, repo, ref, source].some((v) => typeof v !== "string")) return null;
+    return { name, path, repo, ref, source } as RemoteSkill;
+  }
+
+  async skillsDetail(raw: unknown): Promise<void> {
+    const skill = this.asRemoteSkill(raw);
+    if (!skill) return;
+    try {
+      const detail = await fetchSkillDetail(skill, this.settings.skillRepos);
+      this.send({ t: "skills_detail", detail });
+    } catch (err) {
+      this.send({ t: "error", text: `skill preview failed: ${(err as Error).message}` });
+    }
+  }
+
+  async skillsInstall(raw: unknown, scope: string): Promise<void> {
+    const skill = this.asRemoteSkill(raw);
+    if (!skill) return;
+    const target = scope === "global" ? "global" : "local";
+    try {
+      const detail = await fetchSkillDetail(skill, this.settings.skillRepos);
+      const { dir, fileCount } = await installSkill(detail, target, this.cwd);
+      this.send({ t: "skills_installed", name: detail.name, dir, scope: target });
+      this.bridge.pushItem({
+        type: "note",
+        text: `⚡ skill "${detail.name}" installed (${target}, ${fileCount} file${fileCount === 1 ? "" : "s"}) → ${dir} — invoke with /${detail.name}`,
+      });
+    } catch (err) {
+      this.send({ t: "error", text: `skill install failed: ${(err as Error).message}` });
     }
   }
 

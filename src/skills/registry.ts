@@ -12,9 +12,12 @@ export interface SkillDef {
   source: "local" | "global" | "claude-local" | "claude-global" | "claude-plugin";
 }
 
-/** Claude Code skill format: <dir>/<name>/SKILL.md with YAML frontmatter. */
-function parseSkillFile(path: string, fallbackName: string, source: SkillDef["source"]): SkillDef | null {
-  const raw = readFileSync(path, "utf8");
+/** Parse SKILL.md text: YAML frontmatter (name/description, block scalars
+ *  supported) + body. Shared by local discovery and the remote skill hub. */
+export function parseSkillMarkdown(
+  raw: string,
+  fallbackName: string,
+): { name: string; description: string; body: string } | null {
   const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const meta: Record<string, string> = {};
   if (m) {
@@ -40,9 +43,14 @@ function parseSkillFile(path: string, fallbackName: string, source: SkillDef["so
     name: meta["name"] ?? fallbackName,
     description: meta["description"] ?? "",
     body,
-    dir: join(path, ".."),
-    source,
   };
+}
+
+/** Claude Code skill format: <dir>/<name>/SKILL.md with YAML frontmatter. */
+function parseSkillFile(path: string, fallbackName: string, source: SkillDef["source"]): SkillDef | null {
+  const parsed = parseSkillMarkdown(readFileSync(path, "utf8"), fallbackName);
+  if (!parsed) return null;
+  return { ...parsed, dir: join(path, ".."), source };
 }
 
 function loadDir(dir: string, source: SkillDef["source"]): SkillDef[] {

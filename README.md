@@ -83,6 +83,10 @@ with zero cloud dependency:
 - **Your hooks in the loop.** Claude Code-style lifecycle hooks (PreToolUse /
   PostToolUse / Stop / UserPromptSubmit): your shell commands can block tool calls,
   annotate results, or refuse a turn from ending.
+- **A skill hub with ~6k skills.** `/skills browse` — one search box over the popular
+  public SKILL.md databases (anthropics/skills, superpowers, antigravity, …), preview
+  and one-click install, in the terminal and the web UI. Add your own sources in
+  settings; `/skills new` scaffolds a skill and lets the model draft the playbook.
 - **Scriptable.** `grayskull -p "prompt"` runs headless — answer on stdout, progress
   on stderr — for pipes, cron and CI.
 
@@ -294,7 +298,7 @@ Covers: `baseURL`, `model`, `modelFamily`, `families` (custom model families as 
 `defaultMode`, `editor`, `agentConcurrency`, `memory` (enabled / maxTokens /
 globalTriggers / scoring knobs), `diagnostics`, `permissions` (allow/deny),
 `mcpServers`, `hooks` (lifecycle shell hooks), `checkpoints` (/rewind snapshots),
-`addDirs`, `web` (login).
+`addDirs`, `skillRepos` (remote skill databases for `/skills browse`), `web` (login).
 
 **System prompt**: `/system` opens the global one (`~/.config/grayskull/system-prompt.md`)
 in `$EDITOR`; `/system local` creates/edits a per-project prompt that is *appended*
@@ -470,6 +474,36 @@ Three ways skills fire:
   itself when a request matches
 
 `/skills` lists everything found.
+
+**Skill hub — browse the public skill databases.** `/skills browse [query]` opens a
+search box over every configured skill database at once (TUI dialog and web modal;
+`/skills find <query>` prints results anywhere, including headless). Five popular
+databases ship out of the box — [anthropics/skills](https://github.com/anthropics/skills),
+[obra/superpowers](https://github.com/obra/superpowers),
+[daymade/claude-code-skills](https://github.com/daymade/claude-code-skills),
+[tech-leads-club/agent-skills](https://github.com/tech-leads-club/agent-skills) and
+[sickn33/antigravity-awesome-skills](https://github.com/sickn33/antigravity-awesome-skills)
+(~6000 skills) — about 6.2k skills searchable in total. Preview shows the SKILL.md
+before you commit; install drops it into `./.grayskull/skills/` (or `global` →
+`~/.config/grayskull/skills/`) and it is invocable as `/<name>` immediately.
+Add your own databases in `settings.json` — any GitHub repo laid out as
+`<dir>/SKILL.md` works:
+
+```jsonc
+"skillRepos": [
+  { "name": "my-team", "repo": "acme/agent-skills", "subdir": "skills" },
+  { "name": "antigravity", "repo": "sickn33/antigravity-awesome-skills", "disabled": true }
+]
+```
+
+Same `name` as a built-in overrides it; `"disabled": true` hides it. Listings are one
+GitHub tree-API call per repo, cached for a day (set `GITHUB_TOKEN` if you hit the
+anonymous rate limit). `/skills repos` shows the active sources.
+
+**Design your own skills.** `/skills new <name> [global] [description]` scaffolds
+`.grayskull/skills/<name>/SKILL.md` — your local skill repository, discovered
+immediately and shareable via git like any skill pack. Give a description and the
+model drafts the full playbook body for you; omit it for a bare template.
 
 **Skill packs** drop straight in — e.g. the official PixiJS collection (26 skills with a
 router skill that dispatches to specialists, from https://pixijs.com/llms) is installed:
@@ -759,7 +793,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 | `/legendarymode [on\|off]` | toggle the high-agency persona |
 | `/mcp [reconnect <name>]` | MCP status / reconnect |
 | `/agents [edit\|delete <name>]` | manage sub-agents |
-| `/skills` | list discovered skills |
+| `/skills` | list skills · `browse/find <q>` search the skill databases · `install <source>/<name>` · `new <name>` create · `repos` sources |
 | `/<skill-name> [args]` | run a skill |
 | `/thinkingchain`, `/tc` | thinking chains (see above) |
 | `/resume [N]` | list past sessions; `/resume N` restores one |
@@ -772,6 +806,7 @@ conversation (works in the terminal, the web UI, and over the hub — no fzf nee
 ~/.config/grayskull/            global: settings.json, system-prompt.md, legendarymode.md,
                                 GRAYSKULL.md (vault), web-secret (login cookie key),
                                 models-dev.json (metadata cache), jobs.json, job-logs/,
+                                skill-repos/ (skill-hub listing cache),
                                 agents/, chains/, skills/, workers/, sessions/
 <project>/.grayskull/           local: settings.json, system-prompt.md, memory.md,
                                 memory-archive.md, memory-scores.json, prompt-history.txt,

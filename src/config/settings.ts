@@ -260,6 +260,24 @@ export const SettingsSchema = z.object({
     .default([]),
   /** extra working directories surfaced to the model (CLI --add-dir adds more) */
   addDirs: z.array(z.string()).default([]),
+  /** remote skill databases for /skills browse — GitHub repos laid out as
+   *  <dir>/SKILL.md (Claude Code skill format). Built-in defaults merge in
+   *  loadSettings; a user entry with the same name overrides its built-in
+   *  (set disabled to hide one). */
+  skillRepos: z
+    .array(
+      z.object({
+        name: z.string(),
+        /** "owner/name" on github.com */
+        repo: z.string(),
+        /** only index skills under this repo subdirectory */
+        subdir: z.string().optional(),
+        /** git ref for listing + raw fetches; default HEAD (default branch) */
+        branch: z.string().optional(),
+        disabled: z.boolean().optional(),
+      }),
+    )
+    .default([]),
   /** grayskull-web login (web/auth.ts). No passwordHash = auth OFF (trusted
    *  network); set one with `grayskull-web --set-password` before exposing
    *  the interface. */
@@ -284,6 +302,7 @@ export const SettingsSchema = z.object({
 
 export type Settings = z.infer<typeof SettingsSchema>;
 export type McpServerConfig = z.infer<typeof McpServerSchema>;
+export type SkillRepoConfig = Settings["skillRepos"][number];
 
 /** Always-on stack:
  *  - searxng: web search+fetch (bridged to the instance on :8080)
@@ -319,6 +338,21 @@ const BUILTIN_MCP: Record<string, McpServerConfig> = {
 };
 
 const BUILTIN_ALLOW = ["mcp__searxng__*", "mcp__context7__*", "mcp__lsp-ts__*", "mcp__lsp-go__*"];
+
+/** Default skill databases for /skills browse — the popular public SKILL.md
+ *  collections. Users add more (or override/disable these by name) via the
+ *  skillRepos setting. */
+const BUILTIN_SKILL_REPOS: SkillRepoConfig[] = [
+  { name: "anthropic", repo: "anthropics/skills", subdir: "skills" },
+  { name: "superpowers", repo: "obra/superpowers", subdir: "skills" },
+  { name: "daymade", repo: "daymade/claude-code-skills" },
+  { name: "tech-leads-club", repo: "tech-leads-club/agent-skills", subdir: "packages/skills-catalog/skills" },
+  {
+    name: "antigravity",
+    repo: "sickn33/antigravity-awesome-skills",
+    subdir: "plugins/antigravity-awesome-skills-claude/skills",
+  },
+];
 
 function readJson(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
@@ -361,6 +395,12 @@ export function loadSettings(cwd: string): Settings {
   const settings = parsed.data;
   settings.mcpServers = { ...BUILTIN_MCP, ...settings.mcpServers };
   settings.permissions.allow = [...BUILTIN_ALLOW, ...settings.permissions.allow];
+  // built-ins first, user entries override same-name built-ins (or add new)
+  const userRepos = settings.skillRepos;
+  settings.skillRepos = [
+    ...BUILTIN_SKILL_REPOS.map((b) => userRepos.find((r) => r.name === b.name) ?? b),
+    ...userRepos.filter((r) => !BUILTIN_SKILL_REPOS.some((b) => b.name === r.name)),
+  ];
   registerCustomFamilies(settings);
   return settings;
 }

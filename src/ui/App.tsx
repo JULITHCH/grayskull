@@ -22,6 +22,7 @@ import { pickFile } from "./external";
 import { extractImages } from "./images";
 import { BANNER, TAGLINE, KAMIKAZEEE_BANNER, KAMIKAZEEE_WARNING } from "./banners";
 import { SetupDialog } from "./setup";
+import { SkillHubDialog } from "./skillhub";
 import { localDir } from "../config/paths";
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -162,6 +163,8 @@ export function App(props: AppProps): React.ReactElement {
   };
   const [memFlash, setMemFlash] = useState("");
   const [setupOpen, setSetupOpen] = useState(false);
+  // null = closed; a string (possibly "") = open with that initial query
+  const [skillHubQuery, setSkillHubQuery] = useState<string | null>(null);
   const [, forceRender] = useState(0);
 
   const streamRef = useRef("");
@@ -486,6 +489,7 @@ export function App(props: AppProps): React.ReactElement {
         setMode,
         clearTranscript: () => setStaticItems([]),
         openSetup: () => setSetupOpen(true),
+        openSkillsBrowser: (query?: string) => setSkillHubQuery(query ?? ""),
         // real teardown (MCP, hub link, process.exit) runs in index.tsx
         // via waitUntilExit once Ink unmounts
         exit: () => exit(),
@@ -515,8 +519,9 @@ export function App(props: AppProps): React.ReactElement {
   };
 
   useInput((char, key) => {
-    // the /setup dialog has its own useInput — ignore everything while open
-    if (setupOpen) return;
+    // the /setup and skill-hub dialogs have their own useInput — ignore
+    // everything while one is open
+    if (setupOpen || skillHubQuery !== null) return;
 
     // permission prompt steals the keyboard
     if (pendingPerm) {
@@ -690,6 +695,16 @@ export function App(props: AppProps): React.ReactElement {
             setSetupOpen(false);
             publishStatus(); // endpoint edits change the statusline (model, ctx)
           }}
+        />
+      )}
+
+      {skillHubQuery !== null && (
+        <SkillHubDialog
+          cwd={cwd}
+          settings={settings}
+          initialQuery={skillHubQuery}
+          onNote={(text) => pushItem({ type: "note", text })}
+          onClose={() => setSkillHubQuery(null)}
         />
       )}
 

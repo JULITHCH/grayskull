@@ -356,6 +356,18 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "setup_recheck":
         void session?.setupRecheck();
         break;
+      case "skills_open":
+        void session?.skillsOpen(String(msg["query"] ?? ""));
+        break;
+      case "skills_search":
+        void session?.skillsSearch(String(msg["query"] ?? ""));
+        break;
+      case "skills_detail":
+        void session?.skillsDetail(msg["skill"]);
+        break;
+      case "skills_install":
+        void session?.skillsInstall(msg["skill"], String(msg["scope"] ?? "local"));
+        break;
       case "close_session":
         terms.kill(sid);
         manager.close(sid);
