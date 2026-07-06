@@ -323,7 +323,7 @@ button.btn.danger { color: var(--red); border-color: var(--red); }
 /* empty state: no active session — centered new-chat / new-project, composer + mode row hidden */
 #noSess { display: none; }
 body.nosess #noSess { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-body.nosess #transcript, body.nosess #inputBar, body.nosess #statusBar, body.nosess #attachments { display: none !important; }
+body.nosess #transcript, body.nosess #inputBar, body.nosess #statusBar, body.nosess #attachments, body.nosess #termPanel { display: none !important; }
 #noSess .nsHead { color: var(--g-dim); letter-spacing: 4px; margin-bottom: 8px; }
 #noSess button { font: inherit; font-size: 13px; background: none; color: var(--g); border: 1px solid var(--g-faint);
   padding: 12px 0; width: 240px; cursor: pointer; letter-spacing: 1px; }
@@ -623,8 +623,11 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   #statusBar::-webkit-scrollbar { display: none; }
   #modeBtns { flex: 0 0 auto; gap: 4px; }
   .modeBtn { font-size: 10px; padding: 7px 9px; }
-  #termBtn, #tpsTxt, #tokTxt { display: none; }
+  #tpsTxt, #tokTxt { display: none; }
   #ctxBar { width: 60px; }
+  /* terminal: keep the toggle in the mode row; scale the panel to the
+     viewport so the composer + a slice of transcript stay visible */
+  #termPanel { height: 42dvh; min-height: 180px; }
 
   .setupGrid { grid-template-columns: 1fr; }
   .setupTabs .stab { padding: 7px 11px; }
@@ -683,6 +686,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
       <button onclick="mGo('brain')">🧠 Memory</button>
       <button onclick="mGo('ops')">⛓ Chain &amp; todo</button>
       <button onclick="mGo('auto')">⚙ Workers &amp; jobs</button>
+      <button onclick="mGo('chat');termToggle(true)">⌨ Terminal</button>
       <div class="dvh">SYSTEM</div>
       <button onclick="toggleZen();closeDrawer()">◱ Zen ocean</button>
       <button onclick="$('setupBtn').click();closeDrawer()">⚙ Settings</button>
