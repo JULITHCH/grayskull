@@ -80,13 +80,13 @@
 [data-theme="business"] .chip, [data-theme="business"] #themeSel { border-radius: 4px; }
 [data-theme="business"] .chip.alert { text-shadow: none; }
 
-/* ═══════════ claude: corporate skin — clean chat, persistent sidebar, no 3D ═══════════
-   claude & claude-dark share one layout (selectors use [data-theme^="claude"]);
+/* ═══════════ bigtech: corporate skin — clean chat, persistent sidebar, no 3D ═══════════
+   bigtech & bigtech-dark share one layout (selectors use [data-theme^="bigtech"]);
    only the color vars differ. Selecting either flips the app into a clean
    two-column layout (left session list + centered chat, analytics panels hidden,
    all effects/animations off). Layout is desktop-only (min-width 901px); on
    phones the existing mobile shell handles layout and just gets recolored. */
-[data-theme="claude"] {
+[data-theme="bigtech"] {
   --g: #c96442; --g-dim: #73716b; --g-faint: #e6e3da; --fg: #2b2a27; --user: #8a5140;
   --bg: #f4f3ee; --panel: #ffffff; --modal-bg: #ffffff;
   --red: #bc4b3c; --amber: #b7791f; --cyan: #3b7f86; --purple: #6b5bd2;
@@ -94,7 +94,7 @@
   --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --code-bg: #f3f1ea; --input-bg: #ffffff; --surface: #faf9f5;
 }
-[data-theme="claude-dark"] {
+[data-theme="bigtech-dark"] {
   --g: #d97757; --g-dim: #a6a39b; --g-faint: #3d3c38; --fg: #e8e6df; --user: #d4a892;
   --bg: #262624; --panel: #2a2927; --modal-bg: #2a2927;
   --red: #e0674f; --amber: #d6a04a; --cyan: #6fb7be; --purple: #a99bf0;
@@ -103,73 +103,73 @@
   --code-bg: #1f1e1d; --input-bg: #2a2927; --surface: #34332f;
 }
 /* ── cosmetic (all widths): kill decorative chrome + motion, soften surfaces ── */
-[data-theme^="claude"] #backdrop { display: none !important; }
-[data-theme^="claude"] body::after, [data-theme^="claude"] #boot { display: none !important; }
-[data-theme^="claude"] *, [data-theme^="claude"] *::before, [data-theme^="claude"] *::after {
+[data-theme^="bigtech"] #backdrop { display: none !important; }
+[data-theme^="bigtech"] body::after, [data-theme^="bigtech"] #boot { display: none !important; }
+[data-theme^="bigtech"] *, [data-theme^="bigtech"] *::before, [data-theme^="bigtech"] *::after {
   animation: none !important; text-shadow: none !important; }
-[data-theme^="claude"] .panel { box-shadow: none; backdrop-filter: none; border-radius: 12px; background: var(--panel); }
-[data-theme^="claude"] .panel::before, [data-theme^="claude"] .panel::after { display: none; }
-[data-theme^="claude"] .panel h2 { color: var(--g-dim); border-bottom: 1px solid var(--g-faint); letter-spacing: 1px; }
-[data-theme^="claude"] .panel h2 .led { display: none; }
-[data-theme^="claude"] .item code { border-radius: 4px; }
-[data-theme^="claude"] .item pre.code { border-radius: 8px; border-left: 1px solid var(--g-faint); }
-[data-theme^="claude"] .tool-card { border-radius: 8px; border-left-width: 2px; background: var(--surface); }
-[data-theme^="claude"] .item.user { background: var(--surface); }
+[data-theme^="bigtech"] .panel { box-shadow: none; backdrop-filter: none; border-radius: 12px; background: var(--panel); }
+[data-theme^="bigtech"] .panel::before, [data-theme^="bigtech"] .panel::after { display: none; }
+[data-theme^="bigtech"] .panel h2 { color: var(--g-dim); border-bottom: 1px solid var(--g-faint); letter-spacing: 1px; }
+[data-theme^="bigtech"] .panel h2 .led { display: none; }
+[data-theme^="bigtech"] .item code { border-radius: 4px; }
+[data-theme^="bigtech"] .item pre.code { border-radius: 8px; border-left: 1px solid var(--g-faint); }
+[data-theme^="bigtech"] .tool-card { border-radius: 8px; border-left-width: 2px; background: var(--surface); }
+[data-theme^="bigtech"] .item.user { background: var(--surface); }
 
 /* ── desktop layout: left session list + centered chat column ── */
 @media (min-width: 901px) {
-  [data-theme^="claude"] #app { grid-template-columns: 264px 1fr; grid-template-rows: 54px 1fr; gap: 0; padding: 0; }
-  [data-theme^="claude"] body.sidehidden #app { grid-template-columns: 1fr; }
+  [data-theme^="bigtech"] #app { grid-template-columns: 264px 1fr; grid-template-rows: 54px 1fr; gap: 0; padding: 0; }
+  [data-theme^="bigtech"] body.sidehidden #app { grid-template-columns: 1fr; }
   /* clean top bar spanning both columns */
-  [data-theme^="claude"] header { grid-column: 1 / 3; border: none; border-bottom: 1px solid var(--g-faint);
+  [data-theme^="bigtech"] header { grid-column: 1 / 3; border: none; border-bottom: 1px solid var(--g-faint);
     background: var(--panel); border-radius: 0; padding: 0 16px; gap: 10px; }
-  [data-theme^="claude"] header::before { display: none; }
-  [data-theme^="claude"] header .logo { color: var(--fg); letter-spacing: .3px; font-weight: 650; font-size: 17px; }
-  [data-theme^="claude"] header .logo span { display: none; }
-  [data-theme^="claude"] #modelChip, [data-theme^="claude"] #mcpChip, [data-theme^="claude"] #thinkChip,
-  [data-theme^="claude"] #legendChip, [data-theme^="claude"] #fxBtn, [data-theme^="claude"] #zenBtn,
-  [data-theme^="claude"] #clockChip { display: none !important; }
-  [data-theme^="claude"] header .chip { border-radius: 8px; border-color: var(--g-faint); color: var(--g-dim); }
-  [data-theme^="claude"] header .chip:hover { color: var(--g); border-color: var(--g); }
-  [data-theme^="claude"] #drawerBtn { display: flex; align-items: center; }
-  [data-theme^="claude"] #themeSel { border-radius: 8px; color: var(--fg); background: var(--panel);
+  [data-theme^="bigtech"] header::before { display: none; }
+  [data-theme^="bigtech"] header .logo { color: var(--fg); letter-spacing: .3px; font-weight: 650; font-size: 17px; }
+  [data-theme^="bigtech"] header .logo span { display: none; }
+  [data-theme^="bigtech"] #modelChip, [data-theme^="bigtech"] #mcpChip, [data-theme^="bigtech"] #thinkChip,
+  [data-theme^="bigtech"] #legendChip, [data-theme^="bigtech"] #fxBtn, [data-theme^="bigtech"] #zenBtn,
+  [data-theme^="bigtech"] #clockChip { display: none !important; }
+  [data-theme^="bigtech"] header .chip { border-radius: 8px; border-color: var(--g-faint); color: var(--g-dim); }
+  [data-theme^="bigtech"] header .chip:hover { color: var(--g); border-color: var(--g); }
+  [data-theme^="bigtech"] #drawerBtn { display: flex; align-items: center; }
+  [data-theme^="bigtech"] #themeSel { border-radius: 8px; color: var(--fg); background: var(--panel);
     border-color: var(--g-faint); padding: 4px 8px; }
   /* hide analytics rail + splitters */
-  [data-theme^="claude"] #right, [data-theme^="claude"] .gutter { display: none !important; }
+  [data-theme^="bigtech"] #right, [data-theme^="bigtech"] .gutter { display: none !important; }
   /* persistent session sidebar (☰ collapses it) */
-  [data-theme^="claude"] #sessions { grid-column: 1; grid-row: 2; position: static; transform: none;
+  [data-theme^="bigtech"] #sessions { grid-column: 1; grid-row: 2; position: static; transform: none;
     border: none; border-right: 1px solid var(--g-faint); border-radius: 0; background: var(--panel); box-shadow: none; }
-  [data-theme^="claude"] #sessions::before, [data-theme^="claude"] #sessions::after { display: none; }
-  [data-theme^="claude"] body.sidehidden #sessions { display: none; }
-  [data-theme^="claude"] #main { grid-column: 2; grid-row: 2; border: none; border-radius: 0;
+  [data-theme^="bigtech"] #sessions::before, [data-theme^="bigtech"] #sessions::after { display: none; }
+  [data-theme^="bigtech"] body.sidehidden #sessions { display: none; }
+  [data-theme^="bigtech"] #main { grid-column: 2; grid-row: 2; border: none; border-radius: 0;
     box-shadow: none; background: var(--bg); }
   /* centered readable chat column + soft chat bubbles */
-  [data-theme^="claude"] #transcript { padding: 24px 18px 8px; }
-  [data-theme^="claude"] #items, [data-theme^="claude"] #live { max-width: 744px; margin: 0 auto; width: 100%; }
-  [data-theme^="claude"] .item { margin: 15px 0; line-height: 1.62; }
-  [data-theme^="claude"] .item.user { color: var(--fg); border-left: none; border: 1px solid var(--g-faint);
+  [data-theme^="bigtech"] #transcript { padding: 24px 18px 8px; }
+  [data-theme^="bigtech"] #items, [data-theme^="bigtech"] #live { max-width: 744px; margin: 0 auto; width: 100%; }
+  [data-theme^="bigtech"] .item { margin: 15px 0; line-height: 1.62; }
+  [data-theme^="bigtech"] .item.user { color: var(--fg); border-left: none; border: 1px solid var(--g-faint);
     border-radius: 15px 15px 4px 15px; padding: 11px 15px; margin-left: auto; width: fit-content; max-width: 84%; }
-  [data-theme^="claude"] .item.assistant { color: var(--fg); padding: 2px 2px; }
-  [data-theme^="claude"] .item h1, [data-theme^="claude"] .item h2, [data-theme^="claude"] .item h3 {
+  [data-theme^="bigtech"] .item.assistant { color: var(--fg); padding: 2px 2px; }
+  [data-theme^="bigtech"] .item h1, [data-theme^="bigtech"] .item h2, [data-theme^="bigtech"] .item h3 {
     color: var(--fg); letter-spacing: 0; font-size: 15px; font-weight: 650; }
   /* composer: single rounded pill (textarea + round send), centered */
-  [data-theme^="claude"] #inputBar { border: none; border-top: none; max-width: 744px; margin: 6px auto 14px;
+  [data-theme^="bigtech"] #inputBar { border: none; border-top: none; max-width: 744px; margin: 6px auto 14px;
     width: calc(100% - 36px); background: var(--panel); border: 1px solid var(--g-faint); border-radius: 24px;
     padding: 7px 7px 7px 16px; gap: 8px; align-items: flex-end; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
-  [data-theme^="claude"] #inputBar:focus-within { border-color: var(--g); box-shadow: 0 2px 16px var(--glow); }
-  [data-theme^="claude"] #inputBar > #slashMenu { left: 8px; right: 8px; border-radius: 12px; overflow: hidden; }
-  [data-theme^="claude"] #promptInput { background: transparent; border: none; box-shadow: none !important; padding: 9px 4px; }
-  [data-theme^="claude"] #tempCtl { display: none; }
-  [data-theme^="claude"] #sendBtn, [data-theme^="claude"] #stopBtn { width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  [data-theme^="bigtech"] #inputBar:focus-within { border-color: var(--g); box-shadow: 0 2px 16px var(--glow); }
+  [data-theme^="bigtech"] #inputBar > #slashMenu { left: 8px; right: 8px; border-radius: 12px; overflow: hidden; }
+  [data-theme^="bigtech"] #promptInput { background: transparent; border: none; box-shadow: none !important; padding: 9px 4px; }
+  [data-theme^="bigtech"] #tempCtl { display: none; }
+  [data-theme^="bigtech"] #sendBtn, [data-theme^="bigtech"] #stopBtn { width: 38px; height: 38px; padding: 0; border-radius: 50%;
     font-size: 0; display: flex; align-items: center; justify-content: center; align-self: flex-end;
     background: var(--g); color: #fff; border-color: var(--g); }
-  [data-theme^="claude"] #sendBtn::after { content: "↑"; font-size: 19px; font-weight: 700; }
-  [data-theme^="claude"] #stopBtn { background: var(--red); border-color: var(--red); display: none; }
-  [data-theme^="claude"] #stopBtn::after { content: "■"; font-size: 13px; }
-  [data-theme^="claude"] body.generating #stopBtn { display: flex; }
-  [data-theme^="claude"] body.generating #sendBtn { display: none; }
-  [data-theme^="claude"] #statusBar { max-width: 744px; margin: 0 auto; width: 100%; border-top: none; padding: 2px 20px 10px; }
-  [data-theme^="claude"] .modeBtn { border-radius: 7px; }
+  [data-theme^="bigtech"] #sendBtn::after { content: "↑"; font-size: 19px; font-weight: 700; }
+  [data-theme^="bigtech"] #stopBtn { background: var(--red); border-color: var(--red); display: none; }
+  [data-theme^="bigtech"] #stopBtn::after { content: "■"; font-size: 13px; }
+  [data-theme^="bigtech"] body.generating #stopBtn { display: flex; }
+  [data-theme^="bigtech"] body.generating #sendBtn { display: none; }
+  [data-theme^="bigtech"] #statusBar { max-width: 744px; margin: 0 auto; width: 100%; border-top: none; padding: 2px 20px 10px; }
+  [data-theme^="bigtech"] .modeBtn { border-radius: 7px; }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -786,8 +786,8 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
       <option value="darcula">darcula</option><option value="dracula">dracula</option>
       <option value="nord">nord</option><option value="synthwave">synthwave</option>
       <option value="tron">tron</option><option value="business">business</option>
-      <option value="claude">claude (light)</option>
-      <option value="claude-dark">claude (dark)</option>
+      <option value="bigtech">bigtech (light)</option>
+      <option value="bigtech-dark">bigtech (dark)</option>
     </select>
     <div class="chip" id="clockChip">—:—</div>
     <div class="chip" id="connChip">connecting…</div>
@@ -1180,7 +1180,7 @@ function busyProgress(sid) {
 }
 
 /* ═══════════ themes ═══════════ */
-const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron", "business", "claude", "claude-dark"];
+const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron", "business", "bigtech", "bigtech-dark"];
 function setTheme(t) {
   if (!THEMES.includes(t)) t = "matrix";
   document.documentElement.dataset.theme = t;
@@ -3512,7 +3512,7 @@ function mBarLeft() {
   if (document.body.dataset.tab !== "chat") return mGo("chat");
   document.body.classList.contains("drawer") ? closeDrawer() : openDrawer();
 }
-/** claude-skin header ☰: on desktop the session sidebar is persistent, so this
+/** bigtech-skin header ☰: on desktop the session sidebar is persistent, so this
  *  collapses/expands it; on phones it falls back to the slide-in drawer. */
 function toggleSide() {
   if (isMobile()) return mBarLeft();
