@@ -17,7 +17,7 @@ import {
   localSystemPrompt,
   localMemory,
 } from "../config/paths";
-import { loadAgents, deleteAgentDef } from "../agents/registry";
+import { loadAgents, deleteAgentDef, writeAgentDef, toggleAgentDisabled } from "../agents/registry";
 import { loadSkills, skillInvocation } from "../skills/registry";
 import {
   searchHub,
@@ -362,30 +362,68 @@ export const COMMANDS: SlashCommand[] = [
   },
   {
     name: "agents",
-    description: "list agents; /agents edit|delete <name>",
+    description: "list personas; /agents new|edit|enable|disable|delete <name>",
     run: async (ctx, args) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
-      const agents = loadAgents(ctx.cwd);
-      if (parts[0] === "edit" && parts[1]) {
-        const def = agents.find((a) => a.name === parts[1]);
-        if (!def) return note(ctx, `no agent named ${parts[1]}`);
+      const agents = loadAgents(ctx.cwd, ctx.settings.disabledAgents);
+      const sub = parts[0];
+      const name = parts[1];
+
+      if (sub === "new" && name) {
+        if (!/^[a-z0-9-]+$/.test(name)) return note(ctx, "name must be kebab-case (a-z, 0-9, -)");
+        if (agents.some((a) => a.name === name && a.scope !== "builtin")) {
+          return note(ctx, `agent ${name} already exists — /agents edit ${name}`);
+        }
+        const scope = parts[2] === "global" ? "global" : "local";
+        const path = writeAgentDef({
+          cwd: ctx.cwd,
+          scope,
+          name,
+          description: "TODO: one line describing what this persona is for (auto-trigger keys on this)",
+          tools: ["read", "grep", "glob", "bash", "write", "edit"],
+          systemPrompt: `You are ${name}. TODO: role, exact procedure, and the report format you return.`,
+        });
+        openInEditor(path, ctx.settings.editor);
+        return note(ctx, `created ${scope} agent ${name} → ${path} — fill in the description + system prompt`);
+      }
+      if (sub === "edit" && name) {
+        const def = agents.find((a) => a.name === name);
+        if (!def) return note(ctx, `no agent named ${name}`);
         if (def.scope === "builtin") {
-          return note(ctx, `${def.name} is built-in — create a local agent with the same name to override it`);
+          return note(ctx, `${def.name} is built-in — /agents new ${def.name} local to override it`);
         }
         openInEditor(def.filePath, ctx.settings.editor);
         return note(ctx, `edited ${def.filePath}`);
       }
-      if (parts[0] === "delete" && parts[1]) {
-        const def = agents.find((a) => a.name === parts[1]);
-        if (def?.scope === "builtin") {
-          return note(ctx, `${def.name} is built-in and cannot be deleted`);
+      if ((sub === "enable" || sub === "disable") && name) {
+        const def = agents.find((a) => a.name === name);
+        if (!def) return note(ctx, `no agent named ${name}`);
+        const want = sub === "disable";
+        if (def.enabled === !want) return note(ctx, `${name} is already ${want ? "disabled" : "enabled"}`);
+        ctx.settings.disabledAgents = toggleAgentDisabled(ctx.settings.disabledAgents, name);
+        try {
+          saveGlobal(ctx.settings, new Set(["disabledAgents"]));
+        } catch {
+          // in-memory toggle still applies this session even if the write fails
         }
-        return note(ctx, deleteAgentDef(ctx.cwd, parts[1]) ? `deleted agent ${parts[1]}` : `no agent named ${parts[1]}`);
+        return note(ctx, `${want ? "disabled" : "enabled"} agent ${name}`);
+      }
+      if (sub === "delete" && name) {
+        const def = agents.find((a) => a.name === name);
+        if (def?.scope === "builtin") {
+          return note(ctx, `${def.name} is built-in and cannot be deleted (disable it instead: /agents disable ${def.name})`);
+        }
+        return note(ctx, deleteAgentDef(ctx.cwd, name) ? `deleted agent ${name}` : `no agent named ${name}`);
       }
       if (agents.length === 0) {
         return note(ctx, 'no agents yet. Ask for one: "create an agent that checks for spelling mistakes"');
       }
-      note(ctx, agents.map((a) => `${a.name} [${a.scope}] — ${a.description}`).join("\n"));
+      note(
+        ctx,
+        agents
+          .map((a) => `${a.enabled ? "●" : "○"} ${a.name} [${a.scope}] — ${a.description}`)
+          .join("\n"),
+      );
     },
   },
   {

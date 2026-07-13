@@ -236,6 +236,15 @@ export const SettingsSchema = z.object({
   planFirst: z
     .object({ enabled: z.boolean().default(true) })
     .default({ enabled: true }),
+  /** prompt-expand pre-pass (agent/expand.ts): on substantial turns, rewrite
+   *  the terse request into a comprehensive spec that assigns specialist
+   *  personas to each sub-task BEFORE the blueprint is written */
+  promptExpand: z
+    .object({ enabled: z.boolean().default(true) })
+    .default({ enabled: true }),
+  /** agent personas turned off via the Agents panel / `/agents disable`;
+   *  disabled personas are hidden from the catalog, auto-trigger, and spawn */
+  disabledAgents: z.array(z.string()).default([]),
   /** post-edit project check injected into tool results (auto-detected) */
   diagnostics: z
     .object({

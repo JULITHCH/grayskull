@@ -7,7 +7,7 @@ import { needsCompaction, compact } from "../agent/compact";
 import type { Settings } from "../config/settings";
 import type { LeakDialect } from "../llm/profiles";
 import { loadAgents, writeAgentDef, DEFAULT_AGENT_TOOLS } from "./registry";
-import { autoMatchSkills, autoSkillBlock } from "../skills/registry";
+import { autoMatchSkills, autoSkillBlock, loadSkills } from "../skills/registry";
 
 const SUB_AGENT_MAX_RESULT = 8_000;
 
@@ -40,6 +40,8 @@ const createSchema = z.object({
   description: z.string().describe("One line: what this agent is for."),
   system_prompt: z.string().describe("The agent's full system prompt: role, exact procedure, and required output format."),
   tools: z.array(z.string()).optional().describe("Tool names the agent may use (default: read, grep, glob, bash). Give checkers read-only tools."),
+  skills: z.array(z.string()).optional().describe("Skill names to always load when this agent runs (optional)."),
+  triggers: z.array(z.string()).optional().describe("Keywords that auto-delegate to this agent when a request matches them, e.g. ['api','endpoint','schema']. Set these so the persona fires automatically."),
   scope: z.enum(["local", "global"]).optional().describe("local = this project only (default), global = all projects."),
 });
 
@@ -49,8 +51,9 @@ export function registerAgentTools(opts: {
   registry: ToolRegistry;
   concurrency: number;
   /** context-window limits for sub-agent self-compaction; without it a long
-   *  sub-agent run grows until the server 400s on context overflow */
-  settings?: Pick<Settings, "contextWindow" | "compactThreshold" | "maxTokens">;
+   *  sub-agent run grows until the server 400s on context overflow.
+   *  disabledAgents gates which personas can be spawned. */
+  settings?: Pick<Settings, "contextWindow" | "compactThreshold" | "maxTokens" | "disabledAgents">;
   /** tool-call leak dialect for the model family (resolved live so /model
    *  switches reach sub-agents too) */
   leakDialect?: () => LeakDialect;
@@ -71,7 +74,8 @@ export function registerAgentTools(opts: {
     describeCall: (args) => `create_agent(${String(args["name"] ?? "")})`,
     previewCall: async (args) => {
       const a = createSchema.parse(args);
-      return `# ${a.name} (${a.scope ?? "local"})\n${a.description}\ntools: ${(a.tools ?? DEFAULT_AGENT_TOOLS).join(", ")}\n\n${a.system_prompt}`;
+      const trig = a.triggers?.length ? `\ntriggers: ${a.triggers.join(", ")}` : "";
+      return `# ${a.name} (${a.scope ?? "local"})\n${a.description}\ntools: ${(a.tools ?? DEFAULT_AGENT_TOOLS).join(", ")}${trig}\n\n${a.system_prompt}`;
     },
     execute: async (args) => {
       const a = createSchema.parse(args);
@@ -81,6 +85,8 @@ export function registerAgentTools(opts: {
         name: a.name,
         description: a.description,
         tools: a.tools ?? [...DEFAULT_AGENT_TOOLS],
+        ...(a.skills ? { skills: a.skills } : {}),
+        ...(a.triggers ? { triggers: a.triggers } : {}),
         systemPrompt: a.system_prompt,
       });
       return `Agent "${a.name}" created at ${path}. Run it with spawn_agent. You may call spawn_agent several times in one response to fan out over files/modules.`;
@@ -96,19 +102,31 @@ export function registerAgentTools(opts: {
     describeCall: (args) => `spawn_agent(${String(args["agent"] ?? "")}: ${String(args["task"] ?? "").slice(0, 50)})`,
     execute: async (args, ctx) => {
       const { agent: agentName, task } = spawnSchema.parse(args);
-      const def = loadAgents(cwd).find((a) => a.name === agentName);
+      const disabled = opts.settings?.disabledAgents ?? [];
+      const all = loadAgents(cwd, disabled);
+      const def = all.find((a) => a.name === agentName);
       if (!def) {
-        const names = loadAgents(cwd).map((a) => a.name).join(", ") || "(none)";
+        const names = all.filter((a) => a.enabled).map((a) => a.name).join(", ") || "(none)";
         return `error: no agent named "${agentName}". Existing agents: ${names}. Create one with create_agent.`;
+      }
+      if (!def.enabled) {
+        return `error: agent "${agentName}" is disabled. Enable it in the Agents panel (or /agents enable ${agentName}) before spawning it.`;
       }
       const spawnId = `${agentName}-${++spawnCounter}`;
       return semaphore.run(async () => {
         ctx.note(`⚔ ${agentName} → ${task.slice(0, 80)}`);
         monitor({ kind: "spawn", id: spawnId, agent: agentName, task });
-        // sub-agents auto-utilize matching skills too
+        // sub-agents auto-utilize matching skills, plus any skills the persona
+        // is explicitly bound to (def.skills — always loaded when it runs)
         let autoSkills = "";
         try {
-          autoSkills = autoSkillBlock(autoMatchSkills(task, cwd));
+          const bound = def.skills.length
+            ? loadSkills(cwd).filter((s) => def.skills.includes(s.name))
+            : [];
+          const matched = autoMatchSkills(task, cwd);
+          const byName = new Map<string, (typeof matched)[number]>();
+          for (const s of [...bound, ...matched]) byName.set(s.name, s);
+          autoSkills = autoSkillBlock([...byName.values()]);
         } catch {
           // skills are optional context
         }

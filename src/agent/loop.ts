@@ -13,6 +13,9 @@ import { autoMatchSkills, autoSkillBlock, loadSkills, type SkillDef } from "../s
 import { StuckTracker } from "./stuck";
 import { VisualVerifyGate } from "./visual";
 import { PlanGate } from "./plan";
+import { autoMatchAgents, agentDirectiveBlock, enabledAgents } from "../agents/registry";
+import { expandPrompt } from "./expand";
+import type { AgentDef } from "../types";
 import type { SkillGate } from "../skills/tool";
 import { modelProfile, type InferenceProfile, type LeakDialect } from "../llm/profiles";
 import { HookRunner } from "./hooks";
@@ -293,6 +296,11 @@ export async function runToolLoop(opts: {
         let result = typeof raw === "string" ? raw : raw.text;
         if (typeof raw !== "string" && raw.images?.length) {
           resultImages.push({ tool: t.tool.name, urls: raw.images });
+        }
+        // explicit download offer: carry the file ref on the tool card so the
+        // web layer can surface a download button (ignored by TUI/headless)
+        if (typeof raw !== "string" && raw.download) {
+          t.item.download = { name: raw.download.name, size: raw.download.size, path: raw.download.path };
         }
         if (t.tool.kind === "edit" && !result.startsWith("error:")) {
           const diag = runDiagnostics(ctx.cwd);
@@ -611,7 +619,21 @@ export class GrayskullAgent {
     }
   }
 
-  private buildSystemMessage(autoSkills: SkillDef[] = []): ChatMessage {
+  /** Match enabled personas against the turn text so the right specialist fires
+   *  without the model having to remember to delegate (mirror of autoSkills). */
+  private autoAgents(taskText: string): AgentDef[] {
+    try {
+      const matched = autoMatchAgents(taskText, this.cwd, this.settings.disabledAgents);
+      for (const a of matched) {
+        this.ui.pushItem({ type: "note", text: `⚔ persona matched: ${a.name}` });
+      }
+      return matched;
+    } catch {
+      return [];
+    }
+  }
+
+  private buildSystemMessage(autoSkills: SkillDef[] = [], autoAgents: AgentDef[] = []): ChatMessage {
     const base = loadSystemPrompt(this.cwd, this.settings);
     const git = spawnSync("git", ["status", "--porcelain", "-b"], {
       cwd: this.cwd,
@@ -656,6 +678,9 @@ export class GrayskullAgent {
         `# Environment\n${env}`,
         memory,
         agents ? `# Available sub-agents\n${agents}` : "",
+        // matched personas: an explicit "delegate this slice to X" directive so
+        // the right specialist fires even on weak models (see agents/registry)
+        agentDirectiveBlock(autoAgents),
         workers,
         skills
           ? `# Available skills\nIf the request involves a topic listed below, you MUST call the skill tool with that skill's name BEFORE writing any code or answer — treat your own memory of these libraries as outdated. Then follow the returned instructions.\n${skills}`
@@ -768,17 +793,46 @@ export class GrayskullAgent {
       }
     }
 
+    // step 1 of the pre-implementation flow: on a substantial turn, expand the
+    // terse request into a comprehensive spec that assigns specialist personas
+    // to each sub-task, BEFORE the plan-first gate demands a blueprint. Best
+    // effort — a failure degrades to the plain prompt.
+    let promptText = userText;
+    if (this.settings.promptExpand.enabled && this.plan.isActive()) {
+      this.ui.setBusy(true, "expanding request → agent plan");
+      try {
+        const brief = await expandPrompt(
+          this.client,
+          userText,
+          enabledAgents(this.cwd, this.settings.disabledAgents),
+          this.cwd,
+        );
+        if (brief && !signal.aborted) {
+          this.ui.pushItem({ type: "note", text: `📋 expanded brief — specialists assigned:\n${brief}` });
+          promptText =
+            `[Expanded brief for this request: a decomposition into specialist-owned sub-tasks. ` +
+            `Delegate each to its persona with spawn_agent, then plan and execute. The user's original words follow below.]\n\n` +
+            `${brief}\n\n[Original request]\n${userText}`;
+        }
+      } catch {
+        // degrade to the plain prompt
+      }
+    }
+
     // multimodal: attach pasted/picked images as image_url parts (vision models)
     const userContent =
       images.length > 0
         ? [
-            { type: "text" as const, text: userText },
+            { type: "text" as const, text: promptText },
             ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
           ]
-        : userText;
+        : promptText;
     this.history.push({ role: "user", content: userContent });
     const turnLog: string[] = [`user: ${userText.slice(0, 2000)}${images.length ? ` [+${images.length} image]` : ""}`];
-    const messages: ChatMessage[] = [this.buildSystemMessage(this.autoSkills(userText)), ...this.history];
+    const messages: ChatMessage[] = [
+      this.buildSystemMessage(this.autoSkills(promptText), this.autoAgents(promptText)),
+      ...this.history,
+    ];
     let finalText = "";
 
     try {
@@ -820,7 +874,7 @@ export class GrayskullAgent {
     // gate from a previous interactive turn must not block their edits
     this.plan.disarm();
     const messages: ChatMessage[] = [
-      this.buildSystemMessage(this.autoSkills(directive)),
+      this.buildSystemMessage(this.autoSkills(directive), this.autoAgents(directive)),
       { role: "user", content: directive },
     ];
     try {

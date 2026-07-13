@@ -80,6 +80,98 @@
 [data-theme="business"] .chip, [data-theme="business"] #themeSel { border-radius: 4px; }
 [data-theme="business"] .chip.alert { text-shadow: none; }
 
+/* ═══════════ claude: corporate skin — clean chat, persistent sidebar, no 3D ═══════════
+   claude & claude-dark share one layout (selectors use [data-theme^="claude"]);
+   only the color vars differ. Selecting either flips the app into a clean
+   two-column layout (left session list + centered chat, analytics panels hidden,
+   all effects/animations off). Layout is desktop-only (min-width 901px); on
+   phones the existing mobile shell handles layout and just gets recolored. */
+[data-theme="claude"] {
+  --g: #c96442; --g-dim: #73716b; --g-faint: #e6e3da; --fg: #2b2a27; --user: #8a5140;
+  --bg: #f4f3ee; --panel: #ffffff; --modal-bg: #ffffff;
+  --red: #bc4b3c; --amber: #b7791f; --cyan: #3b7f86; --purple: #6b5bd2;
+  --glow: rgba(201,100,66,.10); --sel: rgba(201,100,66,.07);
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --code-bg: #f3f1ea; --input-bg: #ffffff; --surface: #faf9f5;
+}
+[data-theme="claude-dark"] {
+  --g: #d97757; --g-dim: #a6a39b; --g-faint: #3d3c38; --fg: #e8e6df; --user: #d4a892;
+  --bg: #262624; --panel: #2a2927; --modal-bg: #2a2927;
+  --red: #e0674f; --amber: #d6a04a; --cyan: #6fb7be; --purple: #a99bf0;
+  --glow: rgba(217,119,87,.16); --sel: rgba(217,119,87,.10);
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --code-bg: #1f1e1d; --input-bg: #2a2927; --surface: #34332f;
+}
+/* ── cosmetic (all widths): kill decorative chrome + motion, soften surfaces ── */
+[data-theme^="claude"] #backdrop { display: none !important; }
+[data-theme^="claude"] body::after, [data-theme^="claude"] #boot { display: none !important; }
+[data-theme^="claude"] *, [data-theme^="claude"] *::before, [data-theme^="claude"] *::after {
+  animation: none !important; text-shadow: none !important; }
+[data-theme^="claude"] .panel { box-shadow: none; backdrop-filter: none; border-radius: 12px; background: var(--panel); }
+[data-theme^="claude"] .panel::before, [data-theme^="claude"] .panel::after { display: none; }
+[data-theme^="claude"] .panel h2 { color: var(--g-dim); border-bottom: 1px solid var(--g-faint); letter-spacing: 1px; }
+[data-theme^="claude"] .panel h2 .led { display: none; }
+[data-theme^="claude"] .item code { border-radius: 4px; }
+[data-theme^="claude"] .item pre.code { border-radius: 8px; border-left: 1px solid var(--g-faint); }
+[data-theme^="claude"] .tool-card { border-radius: 8px; border-left-width: 2px; background: var(--surface); }
+[data-theme^="claude"] .item.user { background: var(--surface); }
+
+/* ── desktop layout: left session list + centered chat column ── */
+@media (min-width: 901px) {
+  [data-theme^="claude"] #app { grid-template-columns: 264px 1fr; grid-template-rows: 54px 1fr; gap: 0; padding: 0; }
+  [data-theme^="claude"] body.sidehidden #app { grid-template-columns: 1fr; }
+  /* clean top bar spanning both columns */
+  [data-theme^="claude"] header { grid-column: 1 / 3; border: none; border-bottom: 1px solid var(--g-faint);
+    background: var(--panel); border-radius: 0; padding: 0 16px; gap: 10px; }
+  [data-theme^="claude"] header::before { display: none; }
+  [data-theme^="claude"] header .logo { color: var(--fg); letter-spacing: .3px; font-weight: 650; font-size: 17px; }
+  [data-theme^="claude"] header .logo span { display: none; }
+  [data-theme^="claude"] #modelChip, [data-theme^="claude"] #mcpChip, [data-theme^="claude"] #thinkChip,
+  [data-theme^="claude"] #legendChip, [data-theme^="claude"] #fxBtn, [data-theme^="claude"] #zenBtn,
+  [data-theme^="claude"] #clockChip { display: none !important; }
+  [data-theme^="claude"] header .chip { border-radius: 8px; border-color: var(--g-faint); color: var(--g-dim); }
+  [data-theme^="claude"] header .chip:hover { color: var(--g); border-color: var(--g); }
+  [data-theme^="claude"] #drawerBtn { display: flex; align-items: center; }
+  [data-theme^="claude"] #themeSel { border-radius: 8px; color: var(--fg); background: var(--panel);
+    border-color: var(--g-faint); padding: 4px 8px; }
+  /* hide analytics rail + splitters */
+  [data-theme^="claude"] #right, [data-theme^="claude"] .gutter { display: none !important; }
+  /* persistent session sidebar (☰ collapses it) */
+  [data-theme^="claude"] #sessions { grid-column: 1; grid-row: 2; position: static; transform: none;
+    border: none; border-right: 1px solid var(--g-faint); border-radius: 0; background: var(--panel); box-shadow: none; }
+  [data-theme^="claude"] #sessions::before, [data-theme^="claude"] #sessions::after { display: none; }
+  [data-theme^="claude"] body.sidehidden #sessions { display: none; }
+  [data-theme^="claude"] #main { grid-column: 2; grid-row: 2; border: none; border-radius: 0;
+    box-shadow: none; background: var(--bg); }
+  /* centered readable chat column + soft chat bubbles */
+  [data-theme^="claude"] #transcript { padding: 24px 18px 8px; }
+  [data-theme^="claude"] #items, [data-theme^="claude"] #live { max-width: 744px; margin: 0 auto; width: 100%; }
+  [data-theme^="claude"] .item { margin: 15px 0; line-height: 1.62; }
+  [data-theme^="claude"] .item.user { color: var(--fg); border-left: none; border: 1px solid var(--g-faint);
+    border-radius: 15px 15px 4px 15px; padding: 11px 15px; margin-left: auto; width: fit-content; max-width: 84%; }
+  [data-theme^="claude"] .item.assistant { color: var(--fg); padding: 2px 2px; }
+  [data-theme^="claude"] .item h1, [data-theme^="claude"] .item h2, [data-theme^="claude"] .item h3 {
+    color: var(--fg); letter-spacing: 0; font-size: 15px; font-weight: 650; }
+  /* composer: single rounded pill (textarea + round send), centered */
+  [data-theme^="claude"] #inputBar { border: none; border-top: none; max-width: 744px; margin: 6px auto 14px;
+    width: calc(100% - 36px); background: var(--panel); border: 1px solid var(--g-faint); border-radius: 24px;
+    padding: 7px 7px 7px 16px; gap: 8px; align-items: flex-end; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+  [data-theme^="claude"] #inputBar:focus-within { border-color: var(--g); box-shadow: 0 2px 16px var(--glow); }
+  [data-theme^="claude"] #inputBar > #slashMenu { left: 8px; right: 8px; border-radius: 12px; overflow: hidden; }
+  [data-theme^="claude"] #promptInput { background: transparent; border: none; box-shadow: none !important; padding: 9px 4px; }
+  [data-theme^="claude"] #tempCtl { display: none; }
+  [data-theme^="claude"] #sendBtn, [data-theme^="claude"] #stopBtn { width: 38px; height: 38px; padding: 0; border-radius: 50%;
+    font-size: 0; display: flex; align-items: center; justify-content: center; align-self: flex-end;
+    background: var(--g); color: #fff; border-color: var(--g); }
+  [data-theme^="claude"] #sendBtn::after { content: "↑"; font-size: 19px; font-weight: 700; }
+  [data-theme^="claude"] #stopBtn { background: var(--red); border-color: var(--red); display: none; }
+  [data-theme^="claude"] #stopBtn::after { content: "■"; font-size: 13px; }
+  [data-theme^="claude"] body.generating #stopBtn { display: flex; }
+  [data-theme^="claude"] body.generating #sendBtn { display: none; }
+  [data-theme^="claude"] #statusBar { max-width: 744px; margin: 0 auto; width: 100%; border-top: none; padding: 2px 20px 10px; }
+  [data-theme^="claude"] .modeBtn { border-radius: 7px; }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
@@ -266,6 +358,14 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
   white-space: pre-wrap; max-height: 52px; overflow: hidden; }
 .diff { margin: 2px 0; font-size: 12px; }
 .diff .add { color: var(--g); } .diff .del { color: var(--red); } .diff .hunk { color: var(--cyan); }
+/* download offer: a file the agent handed back (offer_download) */
+.dl-chip { display: inline-flex; align-items: center; gap: 8px; margin: 6px 8px; padding: 7px 12px;
+  border: 1px solid var(--g); border-radius: 8px; color: var(--g); text-decoration: none;
+  background: var(--sel); font-size: 12px; cursor: pointer; }
+.dl-chip:hover { background: var(--glow); box-shadow: 0 0 10px var(--glow); }
+.dl-chip .dl-ico { font-size: 15px; }
+.dl-chip .dl-name { color: var(--fg); font-weight: 600; }
+.dl-chip .dl-size { color: var(--g-dim); }
 .stream { color: var(--fg); opacity: .92; white-space: pre-wrap; word-break: break-word; }
 .reason { color: var(--g-dim); font-style: italic; font-size: 12px; white-space: pre-wrap; }
 .reason::before { content: "∴ "; }
@@ -355,8 +455,11 @@ body.nosess #transcript, body.nosess #inputBar, body.nosess #statusBar, body.nos
 .jobForm textarea { resize: vertical; min-height: 60px; }
 .jobForm .row2 { display: flex; gap: 10px; } .jobForm .row2 label { flex: 1; }
 .wcfgDesc { color: var(--g-dim); font-size: 10px; line-height: 1.5; white-space: normal; word-break: break-word; }
-#mesh { position: relative; }
-#meshSvg { width: 100%; height: 100%; }
+#mesh { position: relative; display: flex; flex-direction: column; }
+#meshSvg { width: 100%; height: 100%; flex: 1 1 auto; min-height: 0; }
+#agentsBody { flex: 0 0 auto; max-height: 42%; overflow-y: auto; border-top: 1px solid var(--g-faint); padding: 4px 8px 6px; font-size: 11px; }
+#agentsBody .aRow[data-off="1"] { opacity: .45; }
+#agentsBody .aName { text-transform: none; }
 #memCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #memCanvas:active { cursor: grabbing; }
 .panel h2 .toggle { float: right; cursor: pointer; color: var(--g-dim); border: 1px solid var(--g-faint); padding: 0 6px; }
@@ -409,6 +512,24 @@ body.nosess #transcript, body.nosess #inputBar, body.nosess #statusBar, body.nos
 .modal input { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
   padding: 6px 8px; font-family: inherit; outline: none; }
 .modal .key { color: var(--g); border: 1px solid var(--g-faint); padding: 0 4px; font-size: 10px; }
+
+/* ── file explorer (new-project picker) ── */
+.fsBar { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--g-faint); align-items: center; }
+.fsBar input { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--g-dim);
+  padding: 6px 8px; font-family: inherit; font-size: 12px; outline: none; }
+.fsBar input:focus { border-color: var(--g); }
+button.btn.fsIcon { padding: 6px 9px; }
+.fsList { flex: 1; overflow-y: auto; min-height: 260px; max-height: 52vh; }
+.fsRow { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px;
+  cursor: pointer; color: var(--g-dim); border-bottom: 1px solid var(--g-faint); }
+.fsRow:hover { background: var(--sel); color: var(--fg); }
+.fsRow.file { cursor: default; opacity: .45; }
+.fsRow.file:hover { background: none; color: var(--g-dim); }
+.fsRow .fsIco { flex: 0 0 16px; text-align: center; }
+.fsRow .fsName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fsChk { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--g-dim); align-self: center; cursor: pointer; }
+.fsChk input { flex: none; width: 13px; height: 13px; padding: 0; accent-color: var(--g); }
+.fsErr { color: var(--red); font-size: 11px; align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
 
 /* ── command palette ── */
 #palette { width: min(560px, 92vw); }
@@ -647,6 +768,7 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
 <div id="boot">▮ GRAYSKULL SYSTEMS ONLINE</div>
 <div id="app">
   <header>
+    <div class="chip" id="drawerBtn" title="toggle sessions" style="display:none;cursor:pointer" onclick="toggleSide()">☰</div>
     <div class="logo">GRAYSKULL<span style="opacity:.55">//WEB</span></div>
     <div class="chip" id="modelChip">model: —</div>
     <div class="chip" id="mcpChip">mcp: —</div>
@@ -664,6 +786,8 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
       <option value="darcula">darcula</option><option value="dracula">dracula</option>
       <option value="nord">nord</option><option value="synthwave">synthwave</option>
       <option value="tron">tron</option><option value="business">business</option>
+      <option value="claude">claude (light)</option>
+      <option value="claude-dark">claude (dark)</option>
     </select>
     <div class="chip" id="clockChip">—:—</div>
     <div class="chip" id="connChip">connecting…</div>
@@ -748,8 +872,11 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   <div class="gutter v" id="gutR" title="drag to resize · double-click to reset"></div>
   <div id="right">
     <div class="panel" id="mesh">
-      <h2><span class="led" id="meshLed"></span>AGENT MESH</h2>
+      <h2><span class="led" id="meshLed"></span>AGENT MESH
+        <span class="toggle" id="newAgentBtn" title="create a persona" style="margin-right:6px">+ AGENT</span>
+      </h2>
       <svg id="meshSvg"></svg>
+      <div id="agentsBody">(no session)</div>
     </div>
     <div class="gutter h" id="gutMesh" title="drag to resize · double-click to reset"></div>
     <div class="panel" id="memPanel" style="position:relative">
@@ -862,6 +989,25 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
   </div>
 </div></div>
 
+<div class="modal-bg" id="fsModalBg"><div class="modal" style="width:min(720px,94vw)">
+  <h3>📁 SELECT PROJECT FOLDER</h3>
+  <div class="fsBar">
+    <button class="btn fsIcon" id="fsUp" title="parent folder">↑</button>
+    <button class="btn fsIcon" id="fsHome" title="home">⌂</button>
+    <input id="fsPath" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="/path/to/project">
+    <button class="btn fsIcon" id="fsGo" title="go to this path">→</button>
+  </div>
+  <div class="fsList" id="fsList"></div>
+  <div class="actions">
+    <label class="fsChk"><input type="checkbox" id="fsHidden"> hidden</label>
+    <button class="btn fsIcon" id="fsNew" title="create a new folder here">＋ FOLDER</button>
+    <span class="fsErr" id="fsErr"></span>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('fsModalBg')">CANCEL</button>
+    <button class="btn" id="fsUse">USE THIS FOLDER</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="wcfgModalBg"><div class="modal" style="width:min(560px,92vw)">
   <h3 id="wcfgTitle">CONFIGURE WORKER</h3>
   <div class="body jobForm" id="wcfgBody"></div>
@@ -898,6 +1044,38 @@ textarea.cseGrow { resize: none; overflow: hidden; line-height: 1.45; }
     <div style="flex:1"></div>
     <button class="btn" onclick="closeModal('nworkerModalBg')">CANCEL</button>
     <button class="btn" onclick="submitNewWorker()">BUILD</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="agentModalBg"><div class="modal" style="width:min(680px,94vw)">
+  <h3 id="agentModalTitle">NEW PERSONA</h3>
+  <div class="body jobForm">
+    <label>name (kebab-case, keys auto-trigger)
+      <input id="agentName" placeholder="e.g. api-designer" autocomplete="off">
+    </label>
+    <label>description — one line; shown to the model, and auto-trigger matches it
+      <input id="agentDesc" placeholder="e.g. designs and implements REST/GraphQL API endpoints and schemas" autocomplete="off">
+    </label>
+    <label>trigger keywords (comma-separated) — extra words that auto-delegate to this persona
+      <input id="agentTriggers" placeholder="e.g. api, endpoint, graphql, schema" autocomplete="off">
+    </label>
+    <div class="row2">
+      <label>tools (comma-separated)
+        <input id="agentTools" placeholder="read, grep, glob, bash, write, edit" autocomplete="off">
+      </label>
+      <label>skills to always load (comma-separated, optional)
+        <input id="agentSkills" placeholder="e.g. canvastest" autocomplete="off">
+      </label>
+    </div>
+    <label>system prompt — role, exact procedure, and report format
+      <textarea id="agentPrompt" rows="9" placeholder="You are …. Do …. Report …"></textarea>
+    </label>
+    <div class="aSub" id="agentModalHint"></div>
+  </div>
+  <div class="actions">
+    <div style="flex:1"></div>
+    <button class="btn" onclick="closeModal('agentModalBg')">CANCEL</button>
+    <button class="btn" onclick="submitAgent()">SAVE</button>
   </div>
 </div></div>
 
@@ -970,6 +1148,7 @@ const S = {
   pendingPerm: null, pendingAsk: null,
   chainEdit: null,
   auto: { workers: [], jobs: [] },   // workers + scheduled jobs (server-global)
+  agents: [],                        // persona roster (per-session, cwd-scoped)
   runningJobs: new Set(),            // job names currently executing
   wcfgName: null, wrunName: null, jlogName: null,   // dialog targets
   openTools: new Set(),  // "sid:idx" keys of expanded tool cards
@@ -1001,7 +1180,7 @@ function busyProgress(sid) {
 }
 
 /* ═══════════ themes ═══════════ */
-const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron", "business"];
+const THEMES = ["matrix", "monokai", "darcula", "dracula", "nord", "synthwave", "tron", "business", "claude", "claude-dark"];
 function setTheme(t) {
   if (!THEMES.includes(t)) t = "matrix";
   document.documentElement.dataset.theme = t;
@@ -1244,7 +1423,7 @@ function handle(m) {
     case "sessions":
       S.sessions = m.list;
       // default to a live session; parked ones need an explicit resume click
-      if (!S.current && m.list.length) S.current = (m.list.filter((s) => !s.dormant).pop() ?? m.list[0]).sid;
+      if (!S.current && m.list.length) { S.current = (m.list.filter((s) => !s.dormant).pop() ?? m.list[0]).sid; if (S.current) send({ t: "agents_open", sid: S.current }); }
       renderSessions(); renderAll(); break;
     case "replay":
       S.transcripts[m.sid] = [];
@@ -1276,6 +1455,7 @@ function handle(m) {
       renderAuto();
       break;
     case "auto": S.auto = { workers: m.workers ?? [], jobs: m.jobs ?? [] }; renderAuto(); break;
+    case "agents_data": S.agents = m.agents ?? []; renderAgents(); break;
     case "job_log": openJobLogModal(m.name, m.text); break;
     case "job_note": jlogAppend(m.job, m.text); break;
     case "agent": agentEvent(m.sid, m.ev); break;
@@ -1333,6 +1513,11 @@ function handle(m) {
     case "chain_edit": if (!m.sid || m.sid === S.current) openChainEditor(m); break;
     case "chain_saved": closeModal("chainModalBg"); break;
     case "chain_error": toast(m.message || "chain save failed"); break;
+    case "fs_list":
+      FS.path = m.path; FS.parent = m.parent; FS.home = m.home || FS.home;
+      FS.entries = m.entries || []; FS.error = m.error || "";
+      renderFs();
+      break;
     case "confirm_create":
       void uiConfirm("CREATE DIRECTORY", `Directory doesn't exist:\n${m.cwd}\n\nCreate it and start the session?`, { okLabel: "CREATE" })
         .then((ok) => { if (ok) send({ t: "new_session", cwd: m.cwd, create: true }); });
@@ -1374,7 +1559,7 @@ function renderSessions() {
   const cur = S.sessions.find((s) => s.sid === S.current);
   document.body.classList.toggle("nosess", !cur || !!cur.dormant);
 }
-function selectSession(sid) { S.current = sid; S.openTools.clear(); renderSessions(); renderAll(); bdBuildMemory(); if ($("termPanel").classList.contains("open")) termShow(); }
+function selectSession(sid) { S.current = sid; S.openTools.clear(); S.agents = []; renderSessions(); renderAll(); bdBuildMemory(); if ($("termPanel").classList.contains("open")) termShow(); if (sid) send({ t: "agents_open", sid }); }
 function resumeSession(sid) { S.current = sid; send({ t: "resume_session", sid }); }
 function deleteSession(sid, ev) {
   ev.stopPropagation();
@@ -1394,11 +1579,53 @@ function closeSession(sid, ev) {
     if (S.current === sid) S.current = null;
   });
 }
-$("newSess").onclick = () => {
-  void uiPrompt("NEW PROJECT SESSION", "project directory:", { value: S.defaultCwd }).then((cwd) => {
-    if (cwd) send({ t: "new_session", cwd });
+/* ═══════════ file explorer — new-project folder picker ═══════════ */
+const FS = { path: "", parent: null, home: "", entries: [], error: "", hidden: false };
+function fsChild(name) { return (FS.path === "/" ? "" : FS.path) + "/" + name; }
+function fsGo(path) { send({ t: "fs_list", path: path ?? FS.path, hidden: FS.hidden }); }
+function openFsPicker() {
+  FS.error = ""; FS.hidden = false;
+  $("fsHidden").checked = false;
+  $("fsModalBg").classList.add("open");
+  fsGo(S.defaultCwd || "~");
+  setTimeout(() => $("fsPath").focus(), 0);
+}
+function renderFs() {
+  $("fsPath").value = FS.path || "";
+  $("fsErr").textContent = FS.error || "";
+  $("fsErr").title = FS.error || "";
+  $("fsUp").disabled = !FS.parent;
+  let h = "";
+  if (FS.parent) h += `<div class="fsRow" data-up="1"><span class="fsIco">↑</span><span class="fsName">..</span></div>`;
+  FS.entries.forEach((e, i) => {
+    h += `<div class="fsRow ${e.dir ? "" : "file"}"${e.dir ? ` data-i="${i}"` : ""}>`
+       + `<span class="fsIco">${e.dir ? "📁" : "·"}</span><span class="fsName">${esc(e.name)}</span></div>`;
+  });
+  $("fsList").innerHTML = h || '<div class="fsRow file"><span class="fsName" style="opacity:.5">— empty —</span></div>';
+}
+$("fsList").addEventListener("click", (ev) => {
+  const row = ev.target.closest(".fsRow"); if (!row) return;
+  if (row.dataset.up) return void (FS.parent && fsGo(FS.parent));
+  if (row.dataset.i != null) { const e = FS.entries[+row.dataset.i]; if (e?.dir) fsGo(fsChild(e.name)); }
+});
+$("fsUp").onclick = () => { if (FS.parent) fsGo(FS.parent); };
+$("fsHome").onclick = () => fsGo(FS.home || "~");
+$("fsGo").onclick = () => fsGo($("fsPath").value.trim());
+$("fsPath").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fsGo($("fsPath").value.trim()); } });
+$("fsHidden").onchange = () => { FS.hidden = $("fsHidden").checked; fsGo(FS.path); };
+$("fsNew").onclick = () => {
+  void uiPrompt("NEW FOLDER", "create a folder inside:\n" + FS.path, { placeholder: "folder name", okLabel: "CREATE" }).then((name) => {
+    if (name) send({ t: "fs_mkdir", path: fsChild(name), hidden: FS.hidden });
   });
 };
+$("fsUse").onclick = () => {
+  const cwd = $("fsPath").value.trim() || FS.path;
+  if (!cwd) return;
+  closeModal("fsModalBg");
+  send({ t: "new_session", cwd });
+};
+$("fsModalBg").addEventListener("mousedown", (e) => { if (e.target === $("fsModalBg")) closeModal("fsModalBg"); });
+$("newSess").onclick = () => openFsPicker();
 $("newChat").onclick = () => send({ t: "new_session", kind: "chat" });
 
 /* ═══════════ workers & jobs (automation panel + dialogs) ═══════════ */
@@ -1444,6 +1671,79 @@ function renderAuto() {
     </div>`;
   }).join("") || '<div class="aSub">no jobs yet — + JOB schedules a worker</div>';
   $("autoBody").innerHTML = h;
+}
+
+/* ═══════════ agent personas roster (mesh panel) ═══════════ */
+function renderAgents() {
+  const el = $("agentsBody");
+  if (!el) return;
+  if (!S.current) { el.innerHTML = '<div class="aSub">(no session)</div>'; return; }
+  const list = S.agents || [];
+  let h = '<div class="aHead">PERSONAS</div>';
+  h += list.map((a, i) => {
+    const builtin = a.scope === "builtin";
+    const bound = (a.skills && a.skills.length) ? " · ⚡" + a.skills.join(",") : "";
+    return `
+    <div class="aRow" data-off="${a.enabled ? 0 : 1}" title="${esc(a.description)}${bound}">
+      <span class="aDot ${a.enabled ? "ok" : ""}"></span>
+      <span class="aName">${esc(a.name)}</span>
+      <span class="aSub">[${a.scope}]${bound}</span>
+      <span class="aBtns">
+        <span class="aBtn" onclick="agentToggle(${i})" title="${a.enabled ? "disable" : "enable"}">${a.enabled ? "⏸" : "⏻"}</span>
+        <span class="aBtn" onclick="openAgentModal(${i})" title="${builtin ? "override with a local copy" : "edit"}">✎</span>
+        ${builtin ? "" : `<span class="aBtn" onclick="agentDelete(${i})" title="delete persona">✕</span>`}
+      </span>
+    </div>`;
+  }).join("") || '<div class="aSub">no personas — + AGENT creates one</div>';
+  el.innerHTML = h;
+}
+
+function openAgentModal(idx) {
+  if (!S.current) return toast("open a session first — personas live per project");
+  const a = typeof idx === "number" ? S.agents[idx] : null;
+  const editing = !!a;
+  $("agentModalTitle").textContent = editing ? (a.scope === "builtin" ? "OVERRIDE PERSONA" : "EDIT PERSONA") : "NEW PERSONA";
+  $("agentName").value = a ? a.name : "";
+  $("agentName").disabled = editing;              // name is the identity/filename
+  $("agentDesc").value = a ? a.description : "";
+  $("agentTriggers").value = a ? (a.triggers || []).join(", ") : "";
+  $("agentTools").value = a ? (a.tools || []).join(", ") : "read, grep, glob, bash, write, edit";
+  $("agentSkills").value = a ? (a.skills || []).join(", ") : "";
+  $("agentPrompt").value = a ? a.systemPrompt : "";
+  $("agentModalHint").textContent = editing && a.scope === "builtin"
+    ? "built-in — saving writes a local copy that shadows it (the built-in can still be re-enabled by deleting the copy)."
+    : "description keys auto-trigger: when a request matches it, this persona is delegated automatically.";
+  $("agentModalBg").classList.add("open");
+  setTimeout(() => $(editing ? "agentDesc" : "agentName").focus(), 30);
+}
+
+function submitAgent() {
+  const name = $("agentName").value.trim();
+  if (!/^[a-z0-9-]+$/.test(name)) return toast("name must be kebab-case (a-z, 0-9, -)");
+  if (!$("agentDesc").value.trim()) return toast("give the persona a description — auto-trigger needs it");
+  send({
+    t: "agent_save", sid: S.current,
+    agent: {
+      name,
+      description: $("agentDesc").value.trim(),
+      triggers: $("agentTriggers").value,
+      tools: $("agentTools").value,
+      skills: $("agentSkills").value,
+      systemPrompt: $("agentPrompt").value.trim(),
+    },
+  });
+  closeModal("agentModalBg");
+}
+
+function agentToggle(idx) {
+  const a = S.agents[idx]; if (!a) return;
+  send({ t: "agent_toggle", sid: S.current, name: a.name });
+}
+
+function agentDelete(idx) {
+  const a = S.agents[idx]; if (!a) return;
+  void uiConfirm("DELETE PERSONA", `Delete persona "${a.name}"?`, { danger: true, okLabel: "DELETE" })
+    .then((ok) => { if (ok) send({ t: "agent_delete", sid: S.current, name: a.name }); });
 }
 
 /** Live log modal: opened with a snapshot (jobs) or empty (one-off worker
@@ -1557,6 +1857,7 @@ function jobDelete(name) {
     .then((ok) => { if (ok) send({ t: "job_delete", name }); });
 }
 $("newWorkerBtn").onclick = openNewWorker;
+$("newAgentBtn").onclick = () => openAgentModal();
 $("newJobBtn").onclick = () => {
   if (!S.auto.workers.some((w) => w.configured)) return toast("no configured worker yet — create/configure one first");
   openJobEditor(null);
@@ -1638,7 +1939,13 @@ function copyCode(id, el) {
 }
 
 /* ═══════════ transcript ═══════════ */
-const TOOL_ICONS = { bash: "$", read: "◫", write: "✎", edit: "✎", grep: "⌕", glob: "⌕", todo: "☰", skill: "◈", ask_user: "?", spawn_agent: "⚔", create_agent: "⚔" };
+const TOOL_ICONS = { bash: "$", read: "◫", write: "✎", edit: "✎", grep: "⌕", glob: "⌕", todo: "☰", skill: "◈", ask_user: "?", spawn_agent: "⚔", create_agent: "⚔", offer_download: "⤓" };
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
 function toolIcon(name) {
   if ((name || "").startsWith("mcp__")) return "⇄";
   return TOOL_ICONS[name] || "⚙";
@@ -1662,9 +1969,12 @@ function itemHtml(it, idx) {
     }
     const peek = !open && it.state === "done" && it.result && !it.preview
       ? `<div class="t-peek">${esc(it.result.split("\n").slice(0, 2).join("\n").slice(0, 220))}</div>` : "";
+    const dl = it.download && it.download.url
+      ? `<a class="dl-chip" href="${esc(it.download.url)}" download="${esc(it.download.name)}" onclick="event.stopPropagation()"><span class="dl-ico">⤓</span><span class="dl-name">${esc(it.download.name)}</span><span class="dl-size">${fmtBytes(it.download.size)}</span></a>`
+      : "";
     return `<div class="tool-card ${it.state} ${open ? "open" : ""}">
       <div class="t-head" onclick="toggleTool(${idx})"><span class="t-ico">${stateIco}</span><span>${toolIcon(it.name)}</span><span class="t-name">${esc(it.detail)}</span></div>
-      ${peek}${body ? `<div class="t-body">${body}</div>` : ""}</div>`;
+      ${dl}${peek}${body ? `<div class="t-body">${body}</div>` : ""}</div>`;
   }
   return "";
 }
@@ -1916,7 +2226,7 @@ addEventListener("keydown", (e) => {
     if (document.body.classList.contains("zen")) return toggleZen(false);
     if ($("paletteBg").classList.contains("open")) return closeModal("paletteBg");
     // automation dialogs close on esc instead of interrupting the session
-    for (const id of ["wcfgModalBg", "wrunModalBg", "nworkerModalBg", "jobModalBg", "jlogModalBg", "setupModalBg"]) {
+    for (const id of ["fsModalBg", "wcfgModalBg", "wrunModalBg", "nworkerModalBg", "agentModalBg", "jobModalBg", "jlogModalBg", "setupModalBg"]) {
       if ($(id).classList.contains("open")) return closeModal(id);
     }
     if (!S.pendingPerm && !S.pendingAsk && !$("chainModalBg").classList.contains("open")) interrupt();
@@ -2628,6 +2938,8 @@ function palActions() {
   acts.push({ k: "action", label: "◱ zen — memory ocean (ctrl+.)", run: () => toggleZen() });
   acts.push({ k: "action", label: "⌨ terminal — shell in the project folder (ctrl+`)", run: () => termToggle() });
   acts.push({ k: "action", label: "⏻ logout — end this browser's login", run: () => { location.href = "/logout"; } });
+  acts.push({ k: "action", label: "⚔ + new agent persona", run: () => openAgentModal() });
+  for (const a of S.agents) acts.push({ k: "action", label: `⚔ ${a.enabled ? "disable" : "enable"} persona: ${a.name}`, run: () => send({ t: "agent_toggle", sid: S.current, name: a.name }) });
   acts.push({ k: "auto", label: "⚙ + new worker (agent builds it)", run: openNewWorker });
   acts.push({ k: "auto", label: "⚙ + new job (schedule a worker)", run: () => $("newJobBtn").onclick() });
   for (const w of S.auto.workers) acts.push({ k: "auto", label: `⚙ run worker: ${w.name}`, run: () => openWorkerRun(w.name) });
@@ -3200,6 +3512,12 @@ function mBarLeft() {
   if (document.body.dataset.tab !== "chat") return mGo("chat");
   document.body.classList.contains("drawer") ? closeDrawer() : openDrawer();
 }
+/** claude-skin header ☰: on desktop the session sidebar is persistent, so this
+ *  collapses/expands it; on phones it falls back to the slide-in drawer. */
+function toggleSide() {
+  if (isMobile()) return mBarLeft();
+  document.body.classList.toggle("sidehidden");
+}
 function updateMTitle() {
   const tab = document.body.dataset.tab;
   const menu = $("mMenuBtn");
@@ -3299,7 +3617,7 @@ $("dlgOk").onclick = () => dlgClose(DLG.mode === "prompt" ? $("dlgInput").value.
 $("dlgCancel").onclick = () => dlgClose(dlgCancelValue());
 $("dlgInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("dlgOk").click(); } });
 $("dlgModalBg").addEventListener("mousedown", (e) => { if (e.target === $("dlgModalBg")) dlgClose(dlgCancelValue()); });
-function renderAll() { renderItems(); renderLive(); renderStatus(); renderMemory(); renderMesh(); renderOps(); }
+function renderAll() { renderItems(); renderLive(); renderStatus(); renderMemory(); renderMesh(); renderOps(); renderAgents(); }
 setInterval(() => { $("clockChip").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
 setTheme((() => { try { return localStorage.getItem("gs_theme") || "matrix"; } catch { return "matrix"; } })());
 bdInit();

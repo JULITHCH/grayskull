@@ -48,6 +48,11 @@ export class PlanGate {
     this.active = false;
   }
 
+  /** Whether this turn is armed (substantial). Drives the expand→plan pre-pass. */
+  isActive(): boolean {
+    return this.active;
+  }
+
   /** Call after each completed tool execution (detail = describeCall). */
   noteTool(name: string, kind: string, detail: string): void {
     if (!this.active) return;

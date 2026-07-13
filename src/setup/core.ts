@@ -427,6 +427,8 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
       raw["models"] = settings.models;
     } else if (id === "families" || id.startsWith("family.")) {
       raw["families"] = settings.families;
+    } else if (id === "disabledAgents") {
+      raw["disabledAgents"] = settings.disabledAgents;
     } else if (id.startsWith("conf.")) {
       // patch the whole top-level segment (memory.enabled → the memory object)
       const seg = id.slice(5).split(".")[0]!;

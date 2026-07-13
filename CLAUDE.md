@@ -53,6 +53,14 @@ tool calls.
   workflow in DEFAULT_SYSTEM_PROMPT (TRIVIAL vs SUBSTANTIAL, 5 phases:
   research/blueprint/review/execute/verify). Chain steps exempt (chainStepActive,
   runIsolated disarms). Config `planFirst.enabled`.
+- `agent/expand.ts` — prompt-expand pre-pass (step 1 of two, before the plan
+  gate's blueprint): when the plan gate is armed (`plan.isActive()`),
+  `GrayskullAgent.runTurn` runs `expandPrompt` (one `client.oneShot`, background-
+  safe → "" on failure) to rewrite the terse request into a Goal / Constraints /
+  Task-breakdown spec where each sub-task is assigned `→ owner: <persona>` from the
+  enabled-agent roster. The brief is shown to the user, persisted to
+  `.grayskull/plans/<slug>.brief.md`, and prepended to the turn (original text kept
+  below) so planning + auto-match see it. Config `promptExpand.enabled`.
 - `agent/hooks.ts` — user lifecycle hooks (`hooks` array in settings.json, Claude
   Code conventions): PreToolUse / PostToolUse / Stop / UserPromptSubmit shell
   commands, JSON payload on stdin, `matcher` globs the tool name, exit code 2
@@ -89,10 +97,26 @@ tool calls.
   source of truth. Pure code, no LLM; global vault exempt.
 - `mcp/manager.ts` — official MCP SDK; searxng (`npx -y mcp-searxng`, SEARXNG_URL
   :8080) is a built-in always-on default merged in `config/settings.ts`.
-- `agents/` — sub-agent defs as frontmatter-md in `.grayskull/agents/` + global dir;
-  `create_agent` / `spawn_agent` tools (semaphore-capped, depth 1). Built-ins
-  `explorer` / `reviewer` (registry.ts BUILTIN_AGENTS, read-only, shadowable by
-  same-name defs); system prompt pushes proactive delegation.
+- `agents/` — personas as frontmatter-md in `.grayskull/agents/` + global dir
+  (fields: `tools`, `skills` always-loaded, `triggers` match-only keywords);
+  `create_agent` / `spawn_agent` tools (semaphore-capped, depth 1; spawn refuses
+  disabled personas + unions `def.skills` into the sub-agent). Built-ins
+  (registry.ts BUILTIN_AGENTS, shadowable/disable-able): read-only `explorer` /
+  `reviewer` / `security-auditor`, plus specialist personas `architect`,
+  `frontend-engineer`, `backend-engineer`, `test-engineer`, `docs-writer`.
+  **Enable/disable** lives in `settings.disabledAgents` (single source of truth so
+  built-ins toggle too; `saveGlobal` persists it) — disabled personas are hidden
+  from the catalog (`agentListing`), auto-trigger, and spawn. **Auto-trigger**:
+  `autoMatchAgents` (mirror of skills' `autoMatchSkills`, reuses `tokenize` +
+  `fuzzyTokenMatch`) scores enabled personas by name-part / trigger-keyword /
+  description overlap against the turn text; `GrayskullAgent.autoAgents` emits
+  `⚔ persona matched` notes and `agentDirectiveBlock` injects a "delegate this
+  slice to X" block after `# Available sub-agents` in `buildSystemMessage`. CRUD:
+  TUI `/agents [new|edit|enable|disable|delete] <name>` (new/edit open `$EDITOR`,
+  `TERMINAL_ONLY` in web); web Agents roster in the MESH panel (`+ AGENT`, per-row
+  toggle/✎/✕) → `agents_open`/`agent_save`/`agent_toggle`/`agent_delete` WS msgs →
+  `WebSession` methods. See `agent/expand.ts` for the expand→plan pre-pass that
+  assigns these personas up front.
 - `skills/` — Claude Code-compatible SKILL.md discovery (incl. ~/.claude/skills and the
   plugin cache); exposed as the `skill` tool + `/<name>` slash fallback. Frontmatter
   parser handles YAML block scalars (`description: >`). `skills/hub.ts` — remote skill

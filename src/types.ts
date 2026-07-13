@@ -32,6 +32,10 @@ export interface ToolContext {
 export interface ToolResult {
   text: string;
   images?: string[];
+  /** A file the tool explicitly offers for download (surfaced as a download
+   *  button in the web UI). Path is server-local; the web layer maps it to a
+   *  short-lived token so absolute paths never reach the browser. */
+  download?: { path: string; name: string; size: number };
 }
 
 export interface ToolDef {
@@ -51,7 +55,7 @@ export interface ToolDef {
 export type TranscriptItem =
   | { type: "user"; text: string; images?: string[] }
   | { type: "assistant"; text: string; streaming?: boolean }
-  | { type: "tool"; name: string; detail: string; preview?: string; result?: string; state: "running" | "done" | "error" | "denied" }
+  | { type: "tool"; name: string; detail: string; preview?: string; result?: string; state: "running" | "done" | "error" | "denied"; download?: { name: string; size: number; url?: string; path?: string } }
   | { type: "ask"; question: string; answer?: string }
   | { type: "note"; text: string }
   | { type: "banner"; text: string; color?: string };
@@ -73,7 +77,15 @@ export interface AgentDef {
   description: string;
   /** tool names this agent may use; defaults to read-only set */
   tools: string[];
+  /** skills always injected into this persona's context when it runs */
+  skills: string[];
+  /** extra keywords that auto-trigger this persona (beyond name + description);
+   *  matching-only, not shown in the catalog. Frontmatter `triggers:` */
+  triggers: string[];
   systemPrompt: string;
   scope: "global" | "local" | "builtin";
   filePath: string;
+  /** computed at load time from settings.disabledAgents; disabled personas
+   *  are neither advertised, auto-triggered, nor spawnable */
+  enabled: boolean;
 }

@@ -152,7 +152,7 @@ async function runHeadless(): Promise<void> {
     setBusy: () => {},
   };
   const agent = new GrayskullAgent({ cwd, settings, client, registry, perms, memory, ui: bridge });
-  agent.agentListing = () => agentListing(cwd);
+  agent.agentListing = () => agentListing(cwd, settings.disabledAgents);
   agent.workerListing = () => workerPromptSection();
   agent.skillListing = (exclude) => skillListing(cwd, exclude);
   agent.skillGate = skillGate;
@@ -182,7 +182,7 @@ function runTui(): void {
   };
 
   const agent = new GrayskullAgent({ cwd, settings, client, registry, perms, memory, ui: bridge });
-  agent.agentListing = () => agentListing(cwd);
+  agent.agentListing = () => agentListing(cwd, settings.disabledAgents);
   agent.workerListing = () => workerPromptSection();
   agent.skillListing = (exclude) => skillListing(cwd, exclude);
   agent.skillGate = skillGate;

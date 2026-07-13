@@ -152,7 +152,7 @@ const AUTO_MAX_CHARS = 12_000;
 const DESC_OVERLAP_MIN = 5;
 
 /** "pixi" should hit name part "pixijs"; "migrate" should hit "migration". */
-function fuzzyTokenMatch(a: string, b: string): boolean {
+export function fuzzyTokenMatch(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
   let common = 0;

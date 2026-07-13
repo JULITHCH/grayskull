@@ -17,8 +17,9 @@ import { ensureDirs } from "../config/paths";
 import { ensureStarterChains } from "../chains/registry";
 import { ensureStarterWorkers, workerSummaries, saveWorkerConfig, deleteWorker, loadWorker } from "../workers/registry";
 import { Scheduler, setActiveScheduler, loadJobs, upsertJob, removeJob, setJobEnabled, parseEvery, JOB_LOG_DIR } from "../scheduler/scheduler";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync, mkdirSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
+import { homedir } from "node:os";
 import { runWorker } from "../workers/runtime";
 import { CHATS_CWD } from "./persist";
 import {
@@ -84,6 +85,31 @@ interface CliSession {
   /** last status/memory payloads, replayed to newly connected browsers */
   lastStatus: Record<string, unknown> | null;
   lastMemory: Record<string, unknown> | null;
+}
+
+/** Directory listing for the web file-explorer (new-project picker). Resolves
+ *  `~`, falls back to the parent when handed a file, and returns dirs-first
+ *  entries. Never throws — filesystem errors come back in the payload. */
+function fsListPayload(rawPath: string, showHidden: boolean, fallback: string) {
+  const home = homedir();
+  let raw = (rawPath || fallback || home).trim();
+  if (raw === "~") raw = home;
+  else if (raw.startsWith("~/")) raw = join(home, raw.slice(2));
+  let dir = resolve(raw);
+  try {
+    if (!statSync(dir).isDirectory()) dir = dirname(dir);
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => showHidden || !e.name.startsWith("."))
+      .map((e) => {
+        let isDir = e.isDirectory();
+        if (e.isSymbolicLink()) { try { isDir = statSync(join(dir, e.name)).isDirectory(); } catch { isDir = false; } }
+        return { name: e.name, dir: isDir };
+      })
+      .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.dir ? -1 : 1));
+    return { t: "fs_list", path: dir, parent: dir === "/" ? null : dirname(dir), home, entries };
+  } catch (e) {
+    return { t: "fs_list", path: dir, parent: dir === "/" ? null : dirname(dir), home, entries: [], error: String((e as Error)?.message ?? e) };
+  }
 }
 
 export function startWebServer(opts: { port: number; hostname: string; defaultCwd: string }) {
@@ -281,6 +307,28 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       manager.delete(String(msg["sid"] ?? ""));
       return;
     }
+    // file-explorer for the new-project picker (session-independent)
+    if (msg["t"] === "fs_list") {
+      ws.send(JSON.stringify(fsListPayload(String(msg["path"] ?? ""), Boolean(msg["hidden"]), opts.defaultCwd)));
+      return;
+    }
+    if (msg["t"] === "fs_mkdir") {
+      const home = homedir();
+      let raw = String(msg["path"] ?? "").trim();
+      if (!raw) return;
+      if (raw === "~") raw = home;
+      else if (raw.startsWith("~/")) raw = join(home, raw.slice(2));
+      const target = resolve(raw);
+      try {
+        mkdirSync(target, { recursive: true });
+      } catch (e) {
+        broadcast({ t: "error", text: "mkdir failed: " + String((e as Error)?.message ?? e) });
+        return;
+      }
+      // land inside the freshly created folder, ready to start a project there
+      ws.send(JSON.stringify(fsListPayload(target, Boolean(msg["hidden"]), opts.defaultCwd)));
+      return;
+    }
     // terminals are server-side for every session origin — handle BEFORE the
     // CLI forward below, or a CLI session's term_* would go to the TUI instead
     switch (msg["t"]) {
@@ -368,6 +416,18 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "skills_install":
         void session?.skillsInstall(msg["skill"], String(msg["scope"] ?? "local"));
         break;
+      case "agents_open":
+        session?.agentsOpen();
+        break;
+      case "agent_save":
+        session?.agentSave((msg["agent"] as Record<string, unknown>) ?? {});
+        break;
+      case "agent_toggle":
+        session?.agentToggle(String(msg["name"] ?? ""));
+        break;
+      case "agent_delete":
+        session?.agentDelete(String(msg["name"] ?? ""));
+        break;
       case "close_session":
         terms.kill(sid);
         manager.close(sid);
@@ -454,6 +514,21 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       }
       if (url.pathname === "/zen.mp3") {
         return new Response(Bun.file(zenMp3Path), { headers: { "content-type": "audio/mpeg" } });
+      }
+      // authed file download: serves only files the agent explicitly offered
+      // via offer_download (tokenised per session — no arbitrary path access)
+      if (url.pathname === "/dl") {
+        const sid = url.searchParams.get("sid") ?? "";
+        const id = url.searchParams.get("id") ?? "";
+        const hit = manager.sessions.get(sid)?.resolveDownload(id);
+        if (!hit || !existsSync(hit.path)) return new Response("not found", { status: 404 });
+        const safe = hit.name.replace(/[\r\n"\\]/g, "_");
+        return new Response(Bun.file(hit.path), {
+          headers: {
+            "content-disposition": `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(hit.name)}`,
+            "cache-control": "no-store",
+          },
+        });
       }
       if (url.pathname === "/xterm.js")
         return new Response(xtermJsRaw as unknown as string, { headers: { "content-type": "text/javascript" } });

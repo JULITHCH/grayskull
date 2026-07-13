@@ -11,7 +11,7 @@ import { McpManager } from "../mcp/manager";
 import { SessionStore } from "../session/store";
 import { GrayskullAgent, type UiBridge } from "../agent/loop";
 import { registerAgentTools } from "../agents/runner";
-import { agentListing } from "../agents/registry";
+import { agentListing, loadAgents, writeAgentDef, deleteAgentDef, toggleAgentDisabled } from "../agents/registry";
 import { skillTool } from "../skills/tool";
 import { skillListing } from "../skills/registry";
 import { makeTodoTool, type TodoItem } from "../tools/todo";
@@ -40,7 +40,7 @@ import { registerWorkerTools, workerPromptSection } from "../workers/tools";
 /** slash commands that open $EDITOR or fzf — they would hang the server.
  *  `/tc edit` opens the clickable chain editor instead; /resume is tty-free
  *  (numbered list) and works here. */
-const TERMINAL_ONLY = /^\/(system|settings)\b|^\/(memory|agents|workers)\s+edit\b/;
+const TERMINAL_ONLY = /^\/(system|settings)\b|^\/(memory|agents|workers)\s+edit\b|^\/agents\s+new\b/;
 
 /** `/tc edit [name]` / `/thinkingchain edit [name]` → browser chain editor */
 const CHAIN_EDIT_RE = /^\/(?:tc|thinkingchain)\s+edit\b\s*(.*)$/;
@@ -88,6 +88,10 @@ export class WebSession {
   private todoState: { items: TodoItem[] };
   private sticky: { def: ChainDef; mode: ChainContextMode } | null = null;
   private bridge: UiBridge;
+  /** files the agent explicitly offered for download this run, keyed by an
+   *  opaque token so absolute paths never leave the server; served by /dl */
+  private downloads = new Map<string, { path: string; name: string }>();
+  private downloadCounter = 0;
 
   constructor(cwd: string, broadcast: Broadcast, opts: { kind?: SessionKind; restore?: SavedSession } = {}) {
     const r = opts.restore;
@@ -125,6 +129,13 @@ export class WebSession {
 
     const bridge: UiBridge = {
       pushItem: (item) => {
+        // explicit download offer: swap the server-local path for an opaque
+        // token + /dl url before the item is stored or sent to any browser
+        if (item.type === "tool" && item.download?.path) {
+          const id = `d${++this.downloadCounter}`;
+          this.downloads.set(id, { path: item.download.path, name: item.download.name });
+          item.download = { name: item.download.name, size: item.download.size, url: `/dl?sid=${this.sid}&id=${id}` };
+        }
         this.items.push(item);
         if (this.items.length > 2000) this.items.shift();
         this.send({ t: "item", item });
@@ -189,7 +200,7 @@ export class WebSession {
       memory: this.memory,
       ui: bridge,
     });
-    this.agent.agentListing = () => agentListing(cwd);
+    this.agent.agentListing = () => agentListing(cwd, this.settings.disabledAgents);
     this.agent.workerListing = () => workerPromptSection();
     this.agent.skillListing = (exclude) => skillListing(cwd, exclude);
     this.agent.skillGate = skillGate;
@@ -278,6 +289,12 @@ export class WebSession {
 
   summary(): Record<string, unknown> {
     return { sid: this.sid, cwd: this.cwd, mode: this.perms.mode, busy: this.busy, kind: this.kind, title: this.title };
+  }
+
+  /** Look up a download token → server-local file (for the /dl route). Only
+   *  files the agent explicitly offered this run are resolvable. */
+  resolveDownload(id: string): { path: string; name: string } | undefined {
+    return this.downloads.get(id);
   }
 
   prompt(text: string, images: string[] = []): void {
@@ -577,6 +594,97 @@ export class WebSession {
     } catch (err) {
       this.send({ t: "error", text: `setup save failed: ${(err as Error).message}` });
     }
+  }
+
+  // ── agent personas (Agents panel) ───────────────────────────────────────
+
+  /** Send the full persona roster (enabled flag included) for the Agents panel. */
+  agentsOpen(): void {
+    this.send({
+      t: "agents_data",
+      agents: loadAgents(this.cwd, this.settings.disabledAgents).map((a) => ({
+        name: a.name,
+        description: a.description,
+        tools: a.tools,
+        skills: a.skills,
+        triggers: a.triggers,
+        systemPrompt: a.systemPrompt,
+        scope: a.scope,
+        enabled: a.enabled,
+      })),
+    });
+  }
+
+  /** Create or edit a persona from the modal. Built-ins can't be written to
+   *  disk, so editing one writes a local override with the same name. */
+  agentSave(a: Record<string, unknown>): void {
+    const name = String(a["name"] ?? "").trim();
+    if (!/^[a-z0-9-]+$/.test(name)) {
+      return this.send({ t: "error", text: "agent name must be kebab-case (a-z, 0-9, -)" });
+    }
+    const list = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? v.map(String).map((s) => s.trim()).filter(Boolean)
+        : String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const existing = loadAgents(this.cwd).find((x) => x.name === name);
+    // preserve the existing non-builtin scope on edit; new agents default local
+    const scope =
+      a["scope"] === "global"
+        ? "global"
+        : existing && existing.scope !== "builtin"
+          ? existing.scope
+          : "local";
+    try {
+      const path = writeAgentDef({
+        cwd: this.cwd,
+        scope,
+        name,
+        description: String(a["description"] ?? "").trim(),
+        tools: list(a["tools"]).length ? list(a["tools"]) : ["read", "grep", "glob", "bash"],
+        skills: list(a["skills"]),
+        triggers: list(a["triggers"]),
+        systemPrompt: String(a["systemPrompt"] ?? "").trim(),
+      });
+      this.bridge.pushItem({ type: "note", text: `⚔ persona ${existing ? "updated" : "created"}: ${name} → ${path}` });
+    } catch (err) {
+      return this.send({ t: "error", text: `agent save failed: ${(err as Error).message}` });
+    }
+    this.agentsOpen();
+  }
+
+  /** Enable/disable a persona (persisted in settings.disabledAgents). */
+  agentToggle(name: string): void {
+    if (!loadAgents(this.cwd).some((a) => a.name === name)) {
+      return this.send({ t: "error", text: `no agent named ${name}` });
+    }
+    this.settings.disabledAgents = toggleAgentDisabled(this.settings.disabledAgents, name);
+    try {
+      saveGlobal(this.settings, new Set(["disabledAgents"]));
+    } catch {
+      // session-local toggle still applies even if the write fails
+    }
+    this.agentsOpen();
+  }
+
+  /** Delete a persona def (built-ins can only be disabled, not deleted). */
+  agentDelete(name: string): void {
+    const def = loadAgents(this.cwd).find((a) => a.name === name);
+    if (def?.scope === "builtin") {
+      return this.send({ t: "error", text: `${name} is built-in — disable it instead of deleting` });
+    }
+    if (deleteAgentDef(this.cwd, name)) {
+      // drop any stale disabled entry so a re-created agent starts enabled
+      if (this.settings.disabledAgents.includes(name)) {
+        this.settings.disabledAgents = toggleAgentDisabled(this.settings.disabledAgents, name);
+        try {
+          saveGlobal(this.settings, new Set(["disabledAgents"]));
+        } catch {
+          // best effort
+        }
+      }
+      this.bridge.pushItem({ type: "note", text: `⚔ persona deleted: ${name}` });
+    }
+    this.agentsOpen();
   }
 
   // ── skill hub (/skills browse in the browser) ─────────────────────────
