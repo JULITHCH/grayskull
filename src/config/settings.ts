@@ -298,6 +298,44 @@ export const SettingsSchema = z.object({
       sessionDays: z.number().min(0.01).default(30),
     })
     .default({ sessionDays: 30 }),
+  /** grayskull-discord (discord/bot.ts): a real Discord presence that answers
+   *  when @mentioned/replied/DM'd, web-searches facts, and is sandboxed to its
+   *  bot directory. Token stays in the environment, never in settings. */
+  discord: z
+    .object({
+      /** bot token — set via the setup GUI (DISCORD tab) or $tokenEnv;
+       *  settings value wins over the env var when both exist */
+      token: z.string().optional(),
+      /** env var fallback holding the bot token */
+      tokenEnv: z.string().default("DISCORD_BOT_TOKEN"),
+      /** bot directory = sandbox root (default ~/.config/grayskull/discord-bot) */
+      dir: z.string().optional(),
+      /** channel messages fetched as context per mention */
+      contextMessages: z.number().int().min(1).max(100).default(30),
+      /** hard cap on reply length — longer answers are truncated */
+      maxReplyChars: z.number().int().min(200).max(4000).default(1500),
+      /** also respond to the plain word "grayskull" (not just @mentions) */
+      respondToName: z.boolean().default(true),
+      /** presence line, shown as "Watching <statusText>" */
+      statusText: z.string().default("for @mentions"),
+      /** restrict to these guild (server) ids; empty = all guilds. DMs are
+       *  always answered regardless. */
+      allowedGuilds: z.array(z.string()).default([]),
+      /** restrict to these channel ids; empty = everywhere the bot can read */
+      allowedChannels: z.array(z.string()).default([]),
+      /** ignore messages from other bots (loop protection) */
+      ignoreBots: z.boolean().default(true),
+    })
+    .default({
+      tokenEnv: "DISCORD_BOT_TOKEN",
+      contextMessages: 30,
+      maxReplyChars: 1500,
+      respondToName: true,
+      statusText: "for @mentions",
+      allowedGuilds: [],
+      allowedChannels: [],
+      ignoreBots: true,
+    }),
   /** checkpoint/rewind: snapshot files before every edit-kind tool so /rewind
    *  can restore them (see agent/checkpoints.ts) */
   checkpoints: z

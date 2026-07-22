@@ -6,14 +6,17 @@
   "private": true,
   "bin": {
     "grayskull": "src/index.tsx",
-    "grayskull-web": "src/web/index.ts"
+    "grayskull-web": "src/web/index.ts",
+    "grayskull-discord": "src/discord/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.tsx",
     "web": "bun run src/web/index.ts",
+    "discord": "bun run src/discord/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun build src/index.tsx --compile --outfile dist/grayskull",
-    "build:web": "bun build src/web/index.ts --compile --outfile dist/grayskull-web"
+    "build:web": "bun build src/web/index.ts --compile --outfile dist/grayskull-web",
+    "build:discord": "bun build src/discord/index.ts --compile --outfile dist/grayskull-discord"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -104,6 +104,18 @@ export const CONF_SPEC: readonly FieldSpec[] = [
   { key: "checkpoints.keep", label: "checkpoints kept", kind: "number" },
 ] as const;
 
+/** Discord-bot knobs (grayskull-discord), rendered as the DISCORD group/tab.
+ *  Same conf.* id namespace as CONF_SPEC — applyField/saveGlobal treat them
+ *  identically (dotted keys, zod-revalidated, saved as the discord segment).
+ *  The token and the id lists need custom parsing and live outside this spec. */
+export const DISCORD_CONF: readonly FieldSpec[] = [
+  { key: "discord.contextMessages", label: "context messages", kind: "number", help: "channel history fetched per mention (1–100)" },
+  { key: "discord.maxReplyChars", label: "max reply chars", kind: "number", help: "hard cap, longer answers are truncated (200–4000)" },
+  { key: "discord.respondToName", label: "respond to name", kind: "toggle", help: "plain \"grayskull\" triggers too, not just @mentions" },
+  { key: "discord.statusText", label: "presence text", kind: "text", help: "shown as \"Watching <text>\"" },
+  { key: "discord.ignoreBots", label: "ignore other bots", kind: "toggle", help: "loop protection" },
+] as const;
+
 export interface SetupField {
   /** "active.<key>" | "preset.<name>.<key>" | "mcp.searxng.url" */
   id: string;
@@ -224,6 +236,39 @@ export function listGroups(settings: Settings): SetupGroup[] {
       { id: "mcp.searxng.url", label: "searxng URL", kind: "text", value: getSearxngUrl(settings) },
     ],
   });
+  // discord bot: token is write-only (never echoed back); guild/channel ids
+  // are comma-separated lists; restart grayskull-discord to apply
+  const envToken = process.env[settings.discord.tokenEnv];
+  groups.push({
+    id: "discord",
+    title: "DISCORD BOT",
+    fields: [
+      {
+        id: "discord.token",
+        label: "bot token",
+        kind: "secret",
+        value: "",
+        hint: settings.discord.token
+          ? "● set — type a new token to change it, \"off\" to remove; SAVE persists"
+          : `○ not set — falls back to $${settings.discord.tokenEnv} (env ${envToken ? "✓ set" : "✗ not set"})`,
+      },
+      {
+        id: "discord.allowedGuilds",
+        label: "guild ids",
+        kind: "text",
+        value: settings.discord.allowedGuilds.join(", "),
+        hint: "comma-separated server ids; empty = all servers (DMs always answered)",
+      },
+      {
+        id: "discord.allowedChannels",
+        label: "channel ids",
+        kind: "text",
+        value: settings.discord.allowedChannels.join(", "),
+        hint: "comma-separated channel ids; empty = every channel the bot can read",
+      },
+      ...specFields("conf", DISCORD_CONF, settings as unknown as Record<string, unknown>),
+    ],
+  });
   // web login: write-only — the field is always blank, only the argon2id hash
   // is ever stored; the running server re-reads it after SAVE (auth.ts)
   groups.push({
@@ -293,6 +338,23 @@ export function applyField(id: string, value: string, ctx: ApplyContext): boolea
     return true;
   }
 
+  if (id === "discord.token") {
+    const v = value.trim();
+    if (!v) return false; // blank secret field = unchanged
+    if (v.toLowerCase() === "off") delete (settings.discord as { token?: string }).token;
+    else settings.discord.token = v;
+    return true;
+  }
+
+  if (id === "discord.allowedGuilds" || id === "discord.allowedChannels") {
+    // comma/space-separated snowflakes; empty clears the restriction
+    const list = value.split(/[\s,]+/).filter(Boolean);
+    if (list.some((x) => !/^\d{5,25}$/.test(x))) return false; // ids are pure digits
+    if (id === "discord.allowedGuilds") settings.discord.allowedGuilds = list;
+    else settings.discord.allowedChannels = list;
+    return true;
+  }
+
   const active = id.match(/^active\.(\w+)$/);
   if (active) {
     const spec = ACTIVE_SPEC.find((f) => f.key === active[1]);
@@ -320,7 +382,7 @@ export function applyField(id: string, value: string, ctx: ApplyContext): boolea
 
   const conf = id.match(/^conf\.(.+)$/);
   if (conf) {
-    const spec = CONF_SPEC.find((f) => f.key === conf[1]);
+    const spec = [...CONF_SPEC, ...DISCORD_CONF].find((f) => f.key === conf[1]);
     if (!spec) return false;
     const v = coerce(spec, value);
     if (v === null || v === undefined) return false; // behavior knobs are never unset
@@ -438,6 +500,14 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
       const web = (raw["web"] ??= {}) as Record<string, unknown>;
       if (settings.web.passwordHash) web["passwordHash"] = settings.web.passwordHash;
       else delete web["passwordHash"];
+    } else if (id === "discord.token") {
+      const discord = (raw["discord"] ??= {}) as Record<string, unknown>;
+      if (settings.discord.token) discord["token"] = settings.discord.token;
+      else delete discord["token"];
+    } else if (id === "discord.allowedGuilds" || id === "discord.allowedChannels") {
+      const discord = (raw["discord"] ??= {}) as Record<string, unknown>;
+      const key = id.slice("discord.".length);
+      discord[key] = (settings.discord as unknown as Record<string, unknown>)[key];
     }
   }
   writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");

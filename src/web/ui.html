@@ -2984,13 +2984,14 @@ document.querySelectorAll(".modal-bg").forEach((m) => m.addEventListener("moused
 /* ═══════════ settings modal (⚙ cog / /setup) ═══════════ */
 const SETUP = { groups: [], services: [], checking: false, dirty: new Set(), tab: "model",
   md: { q: "", hits: null, busy: false, error: "" } };
-const SETUP_TABS = [["model", "ACTIVE MODEL"], ["presets", "LLM PRESETS"], ["families", "FAMILIES"], ["conf", "BEHAVIOR"], ["services", "SERVICES"]];
+const SETUP_TABS = [["model", "ACTIVE MODEL"], ["presets", "LLM PRESETS"], ["families", "FAMILIES"], ["conf", "BEHAVIOR"], ["discord", "DISCORD"], ["services", "SERVICES"]];
 const escA = (s) => esc(s).replace(/"/g, "&quot;");
 function setupTabOf(g) {
   if (g.id === "active") return "model";
   if (g.id.startsWith("preset.")) return "presets";
   if (g.id.startsWith("family.")) return "families";
   if (g.id === "conf") return "conf";
+  if (g.id === "discord") return "discord";
   return "services"; // web-search group lives with the services
 }
 function setupFieldHtml(f) {
@@ -3070,6 +3071,9 @@ function renderSetup() {
       `<div style="margin:10px 0"><button class="btn" onclick="setupAddFamily()">+ ADD FAMILY (clone active)</button></div>`;
   } else if (tab === "conf") {
     body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">harness behavior — gates, memory, checkpoints, compaction. Values are validated; out-of-range edits are rejected</div>` +
+      groups.map(setupGroupHtml).join("");
+  } else if (tab === "discord") {
+    body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">grayskull as a Discord bot — answers @mentions/replies/DMs from chat context, web-searches facts, sandboxed to its bot folder. SAVE persists; restart <b>bun run discord</b> to apply</div>` +
       groups.map(setupGroupHtml).join("");
   } else {
     body = groups.map(setupGroupHtml).join("") +

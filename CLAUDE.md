@@ -20,6 +20,8 @@ tool calls.
   auto-denied (index.tsx `runHeadless`; CliLink skipped, MCP awaited ≤20s)
 - typecheck: `bunx tsc --noEmit`
 - build binary: `bun run build` → `dist/grayskull`
+- discord bot: `bun run discord` (token from `$DISCORD_BOT_TOKEN`; `--dir <d>` overrides
+  the bot directory) — see `src/discord/`
 
 ## Architecture (src/)
 
@@ -176,9 +178,38 @@ tool calls.
   fix instructions). Web modal: ⚙ cog chip in the header (or /setup) opens a
   TABBED settings dialog — ACTIVE MODEL / LLM PRESETS (with + ADD LLM and a
   models.dev search+import panel) / FAMILIES (+ ADD FAMILY) / BEHAVIOR /
+  DISCORD (bot token + guild/channel ids + reply knobs) /
   SERVICES; session.ts setup* + modelsdev* methods, `setup_*`,
   `setup_family_add`, `modelsdev_search`, `modelsdev_import` WS messages.
   Opened through `CommandContext.openSetup` (set by both TUI App and WebSession).
+- `discord/` — grayskull-discord: real Discord presence. `gateway.ts` minimal
+  Gateway-v10 client on Bun's WebSocket (identify+presence, heartbeat/ack, resume,
+  fatal close codes → exit; MESSAGE_CONTENT is a privileged intent, enable it in the
+  dev portal or the gateway dies with 4014). `rest.ts` REST helpers (channel history,
+  replies with `allowed_mentions` so @everyone can never fire, typing indicator,
+  429 retry). `bot.ts` DiscordBot: answers when @mentioned / replied to / DM'd /
+  called "grayskull" in plain text (`discord.respondToName`); each mention runs a
+  STATELESS agent turn (history reset, the fetched channel transcript — last
+  `discord.contextMessages` — is the memory). Replies go to the channel the message
+  came from (DM → DM), are hard-truncated to `discord.maxReplyChars` (default 1500,
+  fence-closing truncation) and chunked ≤1900 chars. Code answers: short snippets
+  inline as fenced markdown; larger code is written into the bot dir and flagged
+  with a `[attach: path]` marker line → uploaded as a Discord file attachment
+  (multipart, bot-dir-contained, ≤10 files/8MB). The bot
+  lives in its own grayskull project dir (default `~/.config/grayskull/discord-bot`,
+  `discord.dir`): seeded `system-prompt.md` persona (replaceSystemPrompt), own
+  project memory; `memory.rememberGlobal` is stubbed so Discord users can't write
+  the operator's global vault. `sandbox.ts` SandboxPermissionEngine: hard sandbox
+  instead of ask-prompts — file tools only inside the bot dir, searxng/context7 +
+  http_request allowed, everything else denied (no bash, no sub-agents, no ask_user
+  registered at all). Coding gates (planFirst/visualVerify/promptExpand/diagnostics/
+  stuckResearch) disabled; MCP trimmed to searxng+context7. Settings key `discord`
+  (token/tokenEnv/dir/contextMessages/maxReplyChars/respondToName/statusText/
+  allowedGuilds/allowedChannels/ignoreBots) — `token` (settings, wins) falls back
+  to `$tokenEnv`; guild/channel allow-lists filter server messages (DMs always
+  pass). Configured in the web setup modal's DISCORD tab (`setup/core.ts`
+  DISCORD_CONF + write-only token secret + comma-separated id lists, saved via
+  the discord.* / conf.discord.* id namespaces).
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
   via `with {type:"text"}`. `auth.ts` — login for exposed interfaces: argon2id
   password (`grayskull-web --set-password`, hash in settings `web.passwordHash`;
