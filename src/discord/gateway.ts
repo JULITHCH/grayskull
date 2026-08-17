@@ -49,19 +49,55 @@ export class DiscordGateway {
   private hbAcked = true;
   private reconnectMs = 1000;
   private stopped = false;
+  /** last time ANY frame arrived (dispatches, heartbeat ACKs, …). A healthy
+   *  connection ACKs every ~41s heartbeat, so this stays fresh. */
+  private lastActivityAt = Date.now();
+  private watchdog: ReturnType<typeof setInterval> | null = null;
 
   constructor(private opts: GatewayOpts) {}
 
   start(): void {
     this.stopped = false;
     this.connect(GATEWAY_URL);
+    // liveness backstop: a silently dead TCP connection (no close event ever
+    // fires) would otherwise leave a bot that LOOKS online but hears nothing —
+    // the "answers once, then ignores everything" failure. Independent of the
+    // heartbeat-ack check because that one relies on timers on a live socket.
+    this.watchdog ??= setInterval(() => {
+      if (this.stopped || !this.ws) return;
+      if (Date.now() - this.lastActivityAt > 150_000) {
+        this.lastActivityAt = Date.now(); // don't re-trigger while reconnecting
+        this.forceReconnect("no gateway traffic for 150s (dead connection)");
+      }
+    }, 30_000);
   }
 
   stop(): void {
     this.stopped = true;
     this.clearHeartbeat();
+    if (this.watchdog) {
+      clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
     this.ws?.close(1000);
     this.ws = null;
+  }
+
+  /** Tear the current socket down WITHOUT relying on its close event and
+   *  reconnect (resume if possible). Detaching this.ws first means a late
+   *  onclose from the old socket is ignored by the `ws !== this.ws` guard. */
+  private forceReconnect(reason: string): void {
+    if (this.stopped) return;
+    this.opts.log(`gateway: ${reason} — reconnecting`);
+    const old = this.ws;
+    this.ws = null;
+    this.clearHeartbeat();
+    try {
+      old?.close(4000);
+    } catch {
+      // socket may be beyond closing — irrelevant, it's detached
+    }
+    this.scheduleReconnect();
   }
 
   private connect(url: string): void {
@@ -74,7 +110,9 @@ export class DiscordGateway {
       return;
     }
     this.ws = ws;
+    this.lastActivityAt = Date.now();
     ws.onmessage = (ev) => {
+      this.lastActivityAt = Date.now();
       try {
         this.handle(JSON.parse(String(ev.data)) as GatewayPayload);
       } catch {
@@ -135,12 +173,12 @@ export class DiscordGateway {
         break;
       case 7:
         // server asks for a reconnect (resume-able)
-        this.ws?.close(4900);
+        this.forceReconnect("server requested reconnect");
         break;
       case 9:
         // invalid session — resume only if the server says it's resumable
         if (p.d !== true) this.sessionId = null;
-        this.ws?.close(4901);
+        this.forceReconnect("session invalidated");
         break;
       case 0: {
         const t = p.t ?? "";
@@ -188,9 +226,9 @@ export class DiscordGateway {
     setTimeout(() => this.send({ op: 1, d: this.seq }), intervalMs * Math.random());
     this.hbTimer = setInterval(() => {
       if (!this.hbAcked) {
-        // zombie connection: no ack since our last beat — close and resume
-        this.opts.log("gateway: heartbeat not acked — reconnecting");
-        this.ws?.close(4902);
+        // zombie connection: no ack since our last beat — force the reconnect
+        // ourselves instead of trusting a dead socket to emit a close event
+        this.forceReconnect("heartbeat not acked");
         return;
       }
       this.hbAcked = false;

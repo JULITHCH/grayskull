@@ -20,7 +20,9 @@ tool calls.
   auto-denied (index.tsx `runHeadless`; CliLink skipped, MCP awaited ≤20s)
 - typecheck: `bunx tsc --noEmit`
 - build binary: `bun run build` → `dist/grayskull`
-- discord bot: `bun run discord` (token from `$DISCORD_BOT_TOKEN`; `--dir <d>` overrides
+- discord bot: runs INSIDE grayskull-web (auto-started when a token is
+  configured; ⟳ RESTART in ⚙ → DISCORD). `bun run discord` is the standalone
+  fallback (token from settings or `$DISCORD_BOT_TOKEN`; `--dir <d>` overrides
   the bot directory) — see `src/discord/`
 
 ## Architecture (src/)
@@ -179,37 +181,129 @@ tool calls.
   TABBED settings dialog — ACTIVE MODEL / LLM PRESETS (with + ADD LLM and a
   models.dev search+import panel) / FAMILIES (+ ADD FAMILY) / BEHAVIOR /
   DISCORD (bot token + guild/channel ids + reply knobs) /
+  API (OpenAI-compat knobs + one removable group per key, + GENERATE KEY →
+  `setup_apikey_add` → `apikey_created` auto-copies it, base-URL/docs links) /
   SERVICES; session.ts setup* + modelsdev* methods, `setup_*`,
   `setup_family_add`, `modelsdev_search`, `modelsdev_import` WS messages.
   Opened through `CommandContext.openSetup` (set by both TUI App and WebSession).
 - `discord/` — grayskull-discord: real Discord presence. `gateway.ts` minimal
   Gateway-v10 client on Bun's WebSocket (identify+presence, heartbeat/ack, resume,
   fatal close codes → exit; MESSAGE_CONTENT is a privileged intent, enable it in the
-  dev portal or the gateway dies with 4014). `rest.ts` REST helpers (channel history,
+  dev portal or the gateway dies with 4014). All teardown paths go through
+  forceReconnect (detach socket → reconnect) — never trust a dead socket's close
+  event — plus a 150s no-traffic watchdog (healthy connections see heartbeat ACKs
+  every ~41s), so a silently dead TCP link can't leave a deaf-but-online bot.
+  `discord.logAllMessages` (default on) logs one "seen" line per received message
+  and a "dropped:" reason per filter, separating gateway silence from filtering. `rest.ts` REST helpers (channel history,
   replies with `allowed_mentions` so @everyone can never fire, typing indicator,
   429 retry). `bot.ts` DiscordBot: answers when @mentioned / replied to / DM'd /
-  called "grayskull" in plain text (`discord.respondToName`); each mention runs a
+  called by NAME in plain text (`discord.respondToName`) — the name set is the
+  account username + global name + "grayskull" + `discord.extraNames` PLUS the
+  bot's current per-server NICKNAME (`nameRegex(guildId)`, unicode boundaries so
+  punctuation/emoji around it still match, cached per guild). Nicknames come from
+  the bot's own member object in GUILD_CREATE, else one REST
+  `guildMember(guild, me)` call; GUILD_MEMBER_UPDATE needs the privileged
+  GUILD_MEMBERS intent, so a rename is caught by a 10-min TTL re-read that is
+  triggered lazily by the first non-addressed message and re-checks THAT message
+  (a rename never costs the user a message). `selfName()` also labels the bot in
+  the transcript and in the per-turn prompt. Each mention runs a
   STATELESS agent turn (history reset, the fetched channel transcript — last
   `discord.contextMessages` — is the memory). Replies go to the channel the message
   came from (DM → DM), are hard-truncated to `discord.maxReplyChars` (default 1500,
-  fence-closing truncation) and chunked ≤1900 chars. Code answers: short snippets
-  inline as fenced markdown; larger code is written into the bot dir and flagged
-  with a `[attach: path]` marker line → uploaded as a Discord file attachment
-  (multipart, bot-dir-contained, ≤10 files/8MB). The bot
+  fence-closing truncation) and chunked ≤1900 chars. Swiss German detection
+  (SWISS_RE marker words) injects a per-turn Hochdeutsch directive — the system-
+  prompt rule alone doesn't stop a local model from mirroring the channel dialect.
+  Image attachments on the trigger message are downloaded (≤4, ≤8MB) and passed as
+  vision input, with one text-only retry if the model 400s on image parts. Code
+  answers: every fenced block is auto-extracted into a file upload
+  (`externalizeLargeCode`; `discord.attachAllCode` default on — off = only
+  oversized fences >900 chars/30 lines); multi-file results via write-tool +
+  `[attach: path]` marker line (multipart, bot-dir-contained, ≤10 files/8MB).
+  A marker whose file was never written triggers ONE recovery turn (same
+  conversation: "write the file or inline the code, reply again") — weak models
+  reliably emit markers without writing files. REMINDERS (`discord/reminders.ts`,
+  `discord.reminders`): `create_reminder(when, message)` / `list_reminders` /
+  `cancel_reminder` — the model only picks time + text, the harness owns the
+  clock. `parseWhen` takes durations ("10m", "1h30m", "in zwei stunden"), clock
+  times ("18:00", "9 uhr", "8pm"), day words + dayparts ("morgen früh", "heute
+  abend", "übermorgen 12:00") and dates ("26.07. 14:00", "2026-07-26 09:00"),
+  de+en, 5s–1y, null → the accepted formats go back to the model. Reminders are
+  persisted to `<botdir>/.grayskull/reminders.json` (survive the supervisor's
+  restart, overdue ones fire on the next tick), fire on a 15s tick into the
+  conversation they were created in — channel → `<@user>` + reply to the asking
+  message, DM → the DM — and are dropped after 3 failed deliveries.
+  `ReminderStore.setContext()` is set per turn in `respond()` (the serial reply
+  queue makes one slot enough) — no context, no reminder. Per-user cap
+  `discord.maxRemindersPerUser`; cancel only your own. The per-turn prompt block
+  carries the current wall-clock time (`formatNow`, weekday + tz) — without it a
+  model cannot resolve "morgen um 9" — plus the reminder instructions, so the
+  behavior does not depend on an already-seeded persona file. LIVENESS: the reply queue is
+  strictly serial, so every turn runs under runTurnGuarded (3-min wall-clock
+  cap → agent.stop + fallback reply), maxLoopTurns is clamped to 12, and all
+  Discord REST calls carry a 30s AbortSignal — one wedged turn/request must
+  never silence the bot permanently. `discord/prompt.ts` holds DEFAULT_DISCORD_PROMPT +
+  discordBotDir/readDiscordPrompt — the seeded `<botdir>/.grayskull/system-prompt.md`
+  is the live persona (read per turn), editable in the setup GUI's DISCORD tab
+  (multiline field, applied live) alongside a FLUSH BOT MEMORY button
+  (`flushDiscordMemory`: memory.md + memory-scores.json). Global-vault writes are
+  fully stubbed (rememberGlobal AND mergeGlobal — the extractor's auto-promotion
+  path leaked otherwise); personas are all disabled (no spawn_agent). HOSTING:
+  grayskull-web SUPERVISES the bot as a child process (server.ts startDiscordBot:
+  Bun.spawn of discord/index.ts, stdout/err forwarded as `[discord]` lines +
+  "logged in" parsed into the status broadcast `discord_bot`, `discord_restart`
+  WS msg = kill+respawn, auto-restart 15s after unexpected death, immediate-exit
+  = config error → no restart loop, child killed on server exit). In-process
+  hosting was tried and reverted: sharing the server's event loop made the bot
+  go deaf after a turn. Compiled grayskull-web builds can't spawn the source
+  entry — they show an error state; run grayskull-discord separately there.
+  `grayskull-discord` remains the standalone entry (default onFatal = exit). The bot
   lives in its own grayskull project dir (default `~/.config/grayskull/discord-bot`,
   `discord.dir`): seeded `system-prompt.md` persona (replaceSystemPrompt), own
   project memory; `memory.rememberGlobal` is stubbed so Discord users can't write
   the operator's global vault. `sandbox.ts` SandboxPermissionEngine: hard sandbox
   instead of ask-prompts — file tools only inside the bot dir, searxng/context7 +
-  http_request allowed, everything else denied (no bash, no sub-agents, no ask_user
+  http_request/todo/*_reminder allowed (SAFE_TOOLS), everything else denied (no
+  bash, no sub-agents, no ask_user
   registered at all). Coding gates (planFirst/visualVerify/promptExpand/diagnostics/
   stuckResearch) disabled; MCP trimmed to searxng+context7. Settings key `discord`
-  (token/tokenEnv/dir/contextMessages/maxReplyChars/respondToName/statusText/
+  (token/tokenEnv/dir/contextMessages/maxReplyChars/respondToName/extraNames/
+  reminders/maxRemindersPerUser/statusText/
   allowedGuilds/allowedChannels/ignoreBots) — `token` (settings, wins) falls back
   to `$tokenEnv`; guild/channel allow-lists filter server messages (DMs always
   pass). Configured in the web setup modal's DISCORD tab (`setup/core.ts`
   DISCORD_CONF + write-only token secret + comma-separated id lists, saved via
   the discord.* / conf.discord.* id namespaces).
+- `web/openai.ts` — OPENAI-COMPATIBLE API on the same port: `POST /v1/chat/completions`
+  (streaming + non-streaming), `/v1/completions`, `/v1/models[/{id}]`, plus
+  `/api/openapi.json` (OpenAPI 3.1, `web/openapi.ts`) and `/api/docs` (Swagger UI
+  from CDN, built-in fallback renderer when offline). Routed BEFORE the cookie gate
+  because external tools have no login cookie: auth is `Authorization: Bearer gsk-…`
+  against `settings.api.keys` (constant-time compare; a login cookie only counts
+  when a web password actually exists, else `authed()` is true for everyone and the
+  keys would be decorative). /v1/* FAILS CLOSED: no keys = every request 401s with
+  a "generate one in ⚙ → API" message — the passwordless-UI-open rule deliberately
+  does NOT extend to the API. Model ids: `grayskull` = a real agent turn, `grayskull-raw` = plain
+  completion against the configured model, `:<preset>` suffix picks an LLM preset,
+  unknown ids fall back to the agent with an `x-grayskull-model-fallback` header
+  (a 404 would just block the integration). A request carrying `tools` is served in
+  RAW mode — the agent can't execute a caller's tools, so tool_calls come back
+  verbatim. Honored: stream/stream_options.include_usage, temperature, top_p,
+  max_tokens, stop (streaming included), response_format (best-effort via prompt).
+  `n>1` is rejected. Caller `system` messages are hoisted into the turn text —
+  vLLM 400s on a system message that isn't first. Reasoning streams as
+  `delta.reasoning_content`; `x_grayskull` carries mode/web_search/tools_used/cwd.
+  WEB SEARCH IS OFF unless the request sends `web_search: true` (or OpenAI's
+  `web_search_options`); the gate is `agent.setStepMcp(true, <all tools minus
+  mcp__searxng__*>)`, so the model never even sees the tools. `web/apisession.ts`
+  ApiSession = private agent (NOT a WebSession: no browser to answer a permission
+  prompt, no sidebar/persistence) with `ApiPermissionEngine` — read-only by default
+  (`api.permissions`, kind !== "read" denied with an actionable reason), MCP trimmed
+  to searxng+context7, coding gates off, global-vault writes stubbed; pooled
+  (`api.maxSessions`, MCP boot is expensive) with a wall-clock cap. Settings key
+  `api` (enabled/webSearch/permissions/maxSessions/timeoutSeconds/memory/cwd/keys);
+  keys are minted in the ⚙ API tab (`addApiKey` in setup/core.ts, `web/apikey.ts`
+  for the mint) and persisted to settings.json IMMEDIATELY — a key that only lived
+  in the open modal until SAVE would be copied out and rejected.
 - `web/` — grayskull-web (0.0.0.0:4242): `server.ts` Bun.serve + WS, ui.html embedded
   via `with {type:"text"}`. `auth.ts` — login for exposed interfaces: argon2id
   password (`grayskull-web --set-password`, hash in settings `web.passwordHash`;

@@ -278,6 +278,7 @@ header .chip.alert { color: var(--red); border-color: var(--red); text-shadow: 0
 .mdRow .ref { color: var(--fg); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mdRow .meta { color: var(--g-dim); white-space: nowrap; }
 .setupGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.apiCode { background: var(--panel); border: 1px solid var(--g-dim); padding: 1px 6px; cursor: pointer; user-select: all; }
 
 #sessions { grid-row: 2; }
 #sessionList { overflow-y: auto; flex: 1; }
@@ -1477,6 +1478,7 @@ function handle(m) {
       }
       break;
     case "setup_saved": if (m.sid === S.current) { SETUP.dirty.clear(); renderSetup(); } break;
+    case "apikey_created": if (m.sid === S.current) { copyText(m.key); toast("API key created + copied — it works immediately"); } break;
     case "modelsdev_results":
       if (m.sid === S.current) {
         SETUP.md.busy = false; SETUP.md.hits = m.hits ?? []; SETUP.md.error = m.error || "";
@@ -1509,6 +1511,13 @@ function handle(m) {
         toast(`⚡ installed "${m.name}" (${m.scope}) — invoke with /${m.name}`);
         renderSkills();
       }
+      break;
+    case "discord_memory_flushed":
+      if (m.sid === S.current) toast("discord bot memory flushed");
+      break;
+    case "discord_bot":
+      SETUP.discordBot = { state: m.state || "stopped", detail: m.detail || "" };
+      if (SETUP.tab === "discord") renderSetup();
       break;
     case "chain_edit": if (!m.sid || m.sid === S.current) openChainEditor(m); break;
     case "chain_saved": closeModal("chainModalBg"); break;
@@ -2983,8 +2992,8 @@ document.querySelectorAll(".modal-bg").forEach((m) => m.addEventListener("moused
 
 /* ═══════════ settings modal (⚙ cog / /setup) ═══════════ */
 const SETUP = { groups: [], services: [], checking: false, dirty: new Set(), tab: "model",
-  md: { q: "", hits: null, busy: false, error: "" } };
-const SETUP_TABS = [["model", "ACTIVE MODEL"], ["presets", "LLM PRESETS"], ["families", "FAMILIES"], ["conf", "BEHAVIOR"], ["discord", "DISCORD"], ["services", "SERVICES"]];
+  md: { q: "", hits: null, busy: false, error: "" }, discordBot: { state: "stopped", detail: "" } };
+const SETUP_TABS = [["model", "ACTIVE MODEL"], ["presets", "LLM PRESETS"], ["families", "FAMILIES"], ["conf", "BEHAVIOR"], ["discord", "DISCORD"], ["api", "API"], ["services", "SERVICES"]];
 const escA = (s) => esc(s).replace(/"/g, "&quot;");
 function setupTabOf(g) {
   if (g.id === "active") return "model";
@@ -2992,6 +3001,7 @@ function setupTabOf(g) {
   if (g.id.startsWith("family.")) return "families";
   if (g.id === "conf") return "conf";
   if (g.id === "discord") return "discord";
+  if (g.id === "api" || g.id.startsWith("apikey.")) return "api";
   return "services"; // web-search group lives with the services
 }
 function setupFieldHtml(f) {
@@ -3009,10 +3019,12 @@ function setupFieldHtml(f) {
     </select>`;
   } else if (f.kind === "secret") {
     control = `<input style="flex:1" type="password" data-fid="${escA(f.id)}" value="" placeholder="••••••••" autocomplete="new-password" onchange="setupApplyField(this)">`;
+  } else if (f.kind === "multiline") {
+    control = `<textarea style="flex:1;min-height:180px;font-family:inherit;font-size:12px;resize:vertical" data-fid="${escA(f.id)}" onchange="setupApplyField(this)">${esc(f.value)}</textarea>`;
   } else {
     control = `<input style="flex:1" data-fid="${escA(f.id)}" value="${escA(f.value)}"${f.kind === "number" ? ' inputmode="decimal"' : ""} onchange="setupApplyField(this)">`;
   }
-  return `<label>${esc(f.label)}${f.hint ? ` <span style="color:var(--g-dim)">· ${esc(f.hint)}</span>` : ""}${dirtyMark}
+  return `<label${f.kind === "multiline" ? ' style="grid-column:1/-1"' : ""}>${esc(f.label)}${f.hint ? ` <span style="color:var(--g-dim)">· ${esc(f.hint)}</span>` : ""}${dirtyMark}
     <span style="display:flex;gap:6px">${control}</span>
   </label>`;
 }
@@ -3073,8 +3085,27 @@ function renderSetup() {
     body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">harness behavior — gates, memory, checkpoints, compaction. Values are validated; out-of-range edits are rejected</div>` +
       groups.map(setupGroupHtml).join("");
   } else if (tab === "discord") {
-    body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">grayskull as a Discord bot — answers @mentions/replies/DMs from chat context, web-searches facts, sandboxed to its bot folder. SAVE persists; restart <b>bun run discord</b> to apply</div>` +
+    const db = SETUP.discordBot;
+    const dbColor = { running: "var(--g)", starting: "var(--amber)", error: "var(--red)", stopped: "var(--g-dim)" }[db.state] || "var(--g-dim)";
+    const dbIcon = { running: "●", starting: "◐", error: "✗", stopped: "○" }[db.state] || "○";
+    body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">grayskull as a Discord bot — answers @mentions/replies/DMs from chat context, web-searches facts, sandboxed to its bot folder. The bot runs INSIDE grayskull-web; token/id changes need ⟳ RESTART. The persona prompt applies live</div>` +
+      `<div style="margin:8px 0"><span style="color:${dbColor}">${dbIcon}</span> <b>bot ${esc(db.state)}</b> <span style="color:var(--g-dim)">${esc(db.detail || "")}</span></div>` +
+      `<div style="margin:4px 0 10px;display:flex;gap:8px">
+        <button class="btn" onclick="send({t:'discord_restart',sid:S.current})">⟳ ${db.state === "running" || db.state === "starting" ? "RESTART" : "START"} BOT</button>
+        <button class="btn danger" onclick="discordFlushMemory()" title="wipe the bot's learned project memory (memory.md + scores) — takes effect on its next reply">🗑 FLUSH BOT MEMORY</button>
+      </div>` +
       groups.map(setupGroupHtml).join("");
+  } else if (tab === "api") {
+    const base = location.origin + "/v1";
+    body = `<div style="color:var(--g-dim);font-size:11px;margin-bottom:2px">an OpenAI-compatible endpoint in front of the agent — point any OpenAI client at it. Web search is OFF per request unless the caller sends <code>"web_search": true</code>, and API turns are read-only unless you say otherwise. WITHOUT A KEY THE API REFUSES EVERYTHING — generate one below. Keys work the moment they appear; the other fields need SAVE</div>` +
+      `<div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="color:var(--g-dim)">base URL</span> <code class="apiCode" onclick="copyText('${escA(base)}')" title="click to copy">${esc(base)}</code>
+        <span style="color:var(--g-dim)">model</span> <code class="apiCode" onclick="copyText('grayskull')" title="click to copy">grayskull</code>
+        <a class="btn" style="text-decoration:none" href="/api/docs" target="_blank">⧉ SWAGGER DOCS</a>
+        <a class="btn" style="text-decoration:none" href="/api/openapi.json" target="_blank">⤓ OPENAPI JSON</a>
+      </div>` +
+      groups.map(setupGroupHtml).join("") +
+      `<div style="margin:10px 0"><button class="btn" onclick="setupAddApiKey()">+ GENERATE KEY</button></div>`;
   } else {
     body = groups.map(setupGroupHtml).join("") +
       `<div style="color:var(--g);font-weight:bold;margin:10px 0 6px">SERVICES${SETUP.checking ? ' <span style="color:var(--g-dim);font-weight:normal">checking…</span>' : ""}</div>` +
@@ -3115,12 +3146,31 @@ function setupSave() {
   if (SETUP.dirty.size) send({ t: "setup_save", sid: S.current, ids: [...SETUP.dirty] });
 }
 function setupRecheck() { send({ t: "setup_recheck", sid: S.current }); }
+function discordFlushMemory() { send({ t: "discord_flush_memory", sid: S.current }); }
 function setupAddFamily() {
   void uiPrompt("ADD MODEL FAMILY", "name for the new model family (cloned from the active family; same name as a built-in overrides it):", { placeholder: "my-family" }).then((name) => {
     if (!name) return;
     SETUP.dirty.add("families");
     send({ t: "setup_family_add", sid: S.current, name });
   });
+}
+function setupAddApiKey() {
+  void uiPrompt("GENERATE API KEY", "what is this key for? (the tool you are connecting)", { placeholder: "n8n" }).then((name) => {
+    if (name === null) return;
+    send({ t: "setup_apikey_add", sid: S.current, name: name || "" });
+  });
+}
+function copyText(text) {
+  const done = () => toast("copied");
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch { toast("copy failed — select it manually"); }
+  ta.remove();
 }
 function mdSearch() {
   const q = (SETUP.md.q || "").trim();

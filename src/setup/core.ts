@@ -1,10 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Settings, ModelPreset } from "../config/settings";
 import { registerCustomFamilies, SettingsSchema } from "../config/settings";
 import { familyNames, modelProfile, BUILTIN_FAMILIES } from "../llm/profiles";
-import { GLOBAL_SETTINGS } from "../config/paths";
+import { GLOBAL_SETTINGS, localSystemPrompt, localMemory, localDir, ensureDirs } from "../config/paths";
+import { discordBotDir, readDiscordPrompt } from "../discord/prompt";
+import { generateApiKey, newApiKeyId } from "../web/apikey";
 import type { McpManager } from "../mcp/manager";
 import type { LlmClient } from "../llm/client";
 
@@ -16,7 +18,7 @@ import type { LlmClient } from "../llm/client";
  *  and applyField/saveGlobal handle any spec key generically. Extending the
  *  configuration = adding one FieldSpec line. */
 
-export type FieldKind = "text" | "number" | "enum" | "toggle" | "secret";
+export type FieldKind = "text" | "number" | "enum" | "toggle" | "secret" | "multiline";
 
 export interface FieldSpec {
   /** settings/preset property name — may be a dotted path (family presets) */
@@ -111,9 +113,25 @@ export const CONF_SPEC: readonly FieldSpec[] = [
 export const DISCORD_CONF: readonly FieldSpec[] = [
   { key: "discord.contextMessages", label: "context messages", kind: "number", help: "channel history fetched per mention (1–100)" },
   { key: "discord.maxReplyChars", label: "max reply chars", kind: "number", help: "hard cap, longer answers are truncated (200–4000)" },
-  { key: "discord.respondToName", label: "respond to name", kind: "toggle", help: "plain \"grayskull\" triggers too, not just @mentions" },
+  { key: "discord.attachAllCode", label: "attach all code as files", kind: "toggle", help: "every fenced code block becomes a file upload; off = only oversized blocks" },
+  { key: "discord.respondToName", label: "respond to name", kind: "toggle", help: "the bot's name AND its current server nickname trigger in plain text, not just @mentions" },
+  { key: "discord.reminders", label: "reminders", kind: "toggle", help: "create/list/cancel_reminder tools — fire back into the same channel or DM" },
+  { key: "discord.maxRemindersPerUser", label: "max reminders / user", kind: "number", help: "pending reminders one person may hold (1–100)" },
   { key: "discord.statusText", label: "presence text", kind: "text", help: "shown as \"Watching <text>\"" },
   { key: "discord.ignoreBots", label: "ignore other bots", kind: "toggle", help: "loop protection" },
+  { key: "discord.logAllMessages", label: "log every message", kind: "toggle", help: "one \"seen\" console line per received message (drop diagnosis)" },
+] as const;
+
+/** OpenAI-compatible API knobs (web/openai.ts), rendered as the API tab. The
+ *  keys themselves are their own removable groups (one per key) below. */
+export const API_CONF: readonly FieldSpec[] = [
+  { key: "api.enabled", label: "API enabled", kind: "toggle", help: "serve /v1/chat/completions + /v1/models on this port" },
+  { key: "api.webSearch", label: "web search DEFAULT", kind: "toggle", help: "off = a request must send \"web_search\": true to get the searxng tools" },
+  { key: "api.permissions", label: "permissions", kind: "enum", options: ["read-only", "full"], help: "read-only: no bash, no writes. full: an API key gets everything the agent has" },
+  { key: "api.maxSessions", label: "concurrent agents", kind: "number", help: "parallel API turns; further requests queue (1–16)" },
+  { key: "api.timeoutSeconds", label: "request timeout (s)", kind: "number", help: "hard cap per turn (30–3600)" },
+  { key: "api.memory", label: "project memory", kind: "toggle", help: "off = stateless like the OpenAI contract; on = API turns read/write the project memory" },
+  { key: "api.cwd", label: "working directory", kind: "text", help: "what the agent may read (empty = the directory grayskull-web was started in)" },
 ] as const;
 
 export interface SetupField {
@@ -266,9 +284,56 @@ export function listGroups(settings: Settings): SetupGroup[] {
         value: settings.discord.allowedChannels.join(", "),
         hint: "comma-separated channel ids; empty = every channel the bot can read",
       },
+      {
+        id: "discord.extraNames",
+        label: "extra name triggers",
+        kind: "text",
+        value: settings.discord.extraNames.join(", "),
+        hint: "comma-separated nicknames the bot also answers to (its account name + server nickname always count)",
+      },
       ...specFields("conf", DISCORD_CONF, settings as unknown as Record<string, unknown>),
+      {
+        id: "discord.systemPrompt",
+        label: "bot persona / system prompt",
+        kind: "multiline",
+        value: readDiscordPrompt(settings),
+        hint: `applied LIVE (read per turn) — ${localSystemPrompt(discordBotDir(settings))}`,
+      },
     ],
   });
+  // OpenAI-compatible API: knobs + one removable group per key. Keys are
+  // shown in full (they live in settings.json anyway, like the discord token)
+  // so they can be copied into the tool that needs them.
+  groups.push({
+    id: "api",
+    title: "OPENAI-COMPATIBLE API",
+    fields: [...specFields("conf", API_CONF, settings as unknown as Record<string, unknown>)],
+  });
+  for (const key of settings.api.keys) {
+    groups.push({
+      id: `apikey.${key.id}`,
+      title: `KEY · ${key.name || key.id}`,
+      removable: `apikey:${key.id}`,
+      fields: [
+        {
+          id: `apikey.${key.id}.name`,
+          label: "label",
+          kind: "text",
+          value: key.name,
+          hint: "what this key is for (the tool you handed it to)",
+        },
+        {
+          id: `apikey.${key.id}.key`,
+          label: "key",
+          kind: "text",
+          value: key.key,
+          hint: key.createdAt
+            ? `created ${new Date(key.createdAt).toLocaleString()} — send as "Authorization: Bearer <key>"`
+            : 'send as "Authorization: Bearer <key>"',
+        },
+      ],
+    });
+  }
   // web login: write-only — the field is always blank, only the argon2id hash
   // is ever stored; the running server re-reads it after SAVE (auth.ts)
   groups.push({
@@ -346,12 +411,47 @@ export function applyField(id: string, value: string, ctx: ApplyContext): boolea
     return true;
   }
 
+  if (id === "discord.systemPrompt") {
+    // file-backed, not a settings key: the write IS the persistence, and the
+    // running bot picks it up on its next turn (prompt is read per turn)
+    const v = value.trim();
+    if (!v) return false;
+    const dir = discordBotDir(settings);
+    ensureDirs(dir);
+    writeFileSync(localSystemPrompt(dir), v + "\n");
+    return true;
+  }
+
   if (id === "discord.allowedGuilds" || id === "discord.allowedChannels") {
     // comma/space-separated snowflakes; empty clears the restriction
     const list = value.split(/[\s,]+/).filter(Boolean);
     if (list.some((x) => !/^\d{5,25}$/.test(x))) return false; // ids are pure digits
     if (id === "discord.allowedGuilds") settings.discord.allowedGuilds = list;
     else settings.discord.allowedChannels = list;
+    return true;
+  }
+
+  // API key rows: label edit + (rare) manual key edit
+  const apikey = id.match(/^apikey\.([^.]+)\.(name|key)$/);
+  if (apikey) {
+    const entry = settings.api.keys.find((k) => k.id === apikey[1]);
+    if (!entry) return false;
+    if (apikey[2] === "name") entry.name = value.trim().slice(0, 60);
+    else {
+      const v = value.trim();
+      if (v.length < 12) return false; // a short "key" is a typo, not a secret
+      entry.key = v;
+    }
+    return true;
+  }
+
+  if (id === "discord.extraNames") {
+    // comma-separated trigger words; 2+ chars so a stray letter can't make the
+    // bot answer every message
+    settings.discord.extraNames = value
+      .split(",")
+      .map((n) => n.trim())
+      .filter((n) => n.length > 1);
     return true;
   }
 
@@ -451,6 +551,38 @@ export function addPreset(settings: Settings, name: string): string | null {
   return n;
 }
 
+/** Generate an API key for the OpenAI-compatible API and persist it RIGHT
+ *  AWAY. The API re-reads settings.json per request, so a key that only lived
+ *  in the open modal until SAVE would be copied into a tool and rejected. */
+export function addApiKey(settings: Settings, name: string): { id: string; name: string; key: string; createdAt: number } {
+  const entry = { id: newApiKeyId(), name: name.trim().slice(0, 60), key: generateApiKey(), createdAt: Date.now() };
+  settings.api.keys.push(entry);
+  persistApiKeys(settings);
+  return entry;
+}
+
+export function removeApiKey(settings: Settings, id: string): boolean {
+  const before = settings.api.keys.length;
+  settings.api.keys = settings.api.keys.filter((k) => k.id !== id);
+  if (settings.api.keys.length === before) return false;
+  persistApiKeys(settings);
+  return true;
+}
+
+/** Patch ONLY api.keys into the raw global settings.json (the surrounding
+ *  api.* knobs still follow the normal dirty/SAVE flow). */
+function persistApiKeys(settings: Settings): void {
+  let raw: Record<string, unknown> = {};
+  try {
+    if (existsSync(GLOBAL_SETTINGS)) raw = JSON.parse(readFileSync(GLOBAL_SETTINGS, "utf8")) as Record<string, unknown>;
+  } catch {
+    raw = {};
+  }
+  const api = (raw["api"] ??= {}) as Record<string, unknown>;
+  api["keys"] = settings.api.keys;
+  writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");
+}
+
 /** Remove a preset — grayskull's seeded defaults included. Once the models
  *  record is saved, settings.json owns it entirely (zod's defaults only apply
  *  while the key is absent), so removed defaults stay gone. A "family:<name>"
@@ -459,6 +591,8 @@ export function addPreset(settings: Settings, name: string): string | null {
 export function removePreset(settings: Settings, name: string): boolean {
   const fam = name.match(/^family:(.+)$/);
   if (fam) return removeFamily(settings, fam[1]!);
+  const key = name.match(/^apikey:(.+)$/);
+  if (key) return removeApiKey(settings, key[1]!);
   if (!settings.models[name]) return false;
   delete settings.models[name];
   return true;
@@ -504,7 +638,11 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
       const discord = (raw["discord"] ??= {}) as Record<string, unknown>;
       if (settings.discord.token) discord["token"] = settings.discord.token;
       else delete discord["token"];
-    } else if (id === "discord.allowedGuilds" || id === "discord.allowedChannels") {
+    } else if (id.startsWith("apikey.")) {
+      // key rows edited in the GUI (label/key) — the whole api block is the
+      // unit, keys included
+      raw["api"] = settings.api;
+    } else if (id === "discord.allowedGuilds" || id === "discord.allowedChannels" || id === "discord.extraNames") {
       const discord = (raw["discord"] ??= {}) as Record<string, unknown>;
       const key = id.slice("discord.".length);
       discord[key] = (settings.discord as unknown as Record<string, unknown>)[key];
@@ -512,6 +650,15 @@ export function saveGlobal(settings: Settings, dirty: Set<string>): string {
   }
   writeFileSync(GLOBAL_SETTINGS, JSON.stringify(raw, null, 2) + "\n");
   return GLOBAL_SETTINGS;
+}
+
+/** Wipe the Discord bot's project memory (memory.md + activation-score
+ *  sidecar). Returns the flushed directory. The next mention starts blank. */
+export function flushDiscordMemory(settings: Settings): string {
+  const dir = discordBotDir(settings);
+  rmSync(localMemory(dir), { force: true });
+  rmSync(join(localDir(dir), "memory-scores.json"), { force: true });
+  return dir;
 }
 
 export async function checkServices(

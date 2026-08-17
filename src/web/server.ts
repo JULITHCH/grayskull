@@ -13,7 +13,7 @@ import icon512Path from "./icon-512.png" with { type: "file" };
 import { SessionManager } from "./session";
 import { TermManager } from "./term";
 import { ensureGlobalSystemPrompt, loadSettings } from "../config/settings";
-import { ensureDirs } from "../config/paths";
+import { ensureDirs, GLOBAL_DIR } from "../config/paths";
 import { ensureStarterChains } from "../chains/registry";
 import { ensureStarterWorkers, workerSummaries, saveWorkerConfig, deleteWorker, loadWorker } from "../workers/registry";
 import { Scheduler, setActiveScheduler, loadJobs, upsertJob, removeJob, setJobEnabled, parseEvery, JOB_LOG_DIR } from "../scheduler/scheduler";
@@ -27,6 +27,7 @@ import {
   isHttps, isLoopback, loginPage, LoginLimiter, COOKIE_NAME, AuthConfig,
 } from "./auth";
 import { LlmClient } from "../llm/client";
+import { OpenAiApi } from "./openai";
 import type { TranscriptItem } from "../types";
 
 const indexHtml = indexHtmlRaw as unknown as string;
@@ -162,6 +163,110 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
     if (ev.state !== "start") broadcastAuto();
   };
   scheduler.onNote = (job, text) => broadcast({ t: "job_note", job, text });
+
+  // grayskull-discord runs as a SUPERVISED CHILD PROCESS — same isolated
+  // runtime model as standalone `bun run discord` (which is stable), while the
+  // GUI keeps status/restart/log visibility. In-process hosting shared the
+  // event loop with Bun.serve/PTYs/web agents and went deaf after a turn.
+  const DISCORD_ENTRY = join(import.meta.dir, "../discord/index.ts");
+  let discordProc: ReturnType<typeof Bun.spawn> | null = null;
+  let discordStartedAt = 0;
+  let discordRestartTimer: ReturnType<typeof setTimeout> | null = null;
+  let discordState: { state: string; detail: string } = { state: "stopped", detail: "" };
+  const setDiscordState = (state: string, detail: string) => {
+    discordState = { state, detail };
+    broadcast({ t: "discord_bot", ...discordState });
+  };
+  const forwardDiscordOutput = async (stream: ReadableStream<Uint8Array>, proc: unknown): Promise<void> => {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trimEnd();
+          buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          console.log(`[discord] ${line}`);
+          if (discordProc === proc && line.includes("✓ logged in as")) {
+            setDiscordState("running", line.slice(line.indexOf("✓") + 2));
+          }
+        }
+      }
+    } catch {
+      // stream ends when the child dies — the exit handler takes over
+    }
+  };
+  const stopDiscordBot = async (): Promise<void> => {
+    if (discordRestartTimer) {
+      clearTimeout(discordRestartTimer);
+      discordRestartTimer = null;
+    }
+    const proc = discordProc;
+    if (!proc) return;
+    discordProc = null; // detach FIRST so the exit handler knows it's deliberate
+    proc.kill();
+    await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 3000))]).catch(() => {});
+  };
+  const startDiscordBot = async (): Promise<void> => {
+    await stopDiscordBot();
+    let settings: ReturnType<typeof loadSettings>;
+    try {
+      settings = loadSettings(GLOBAL_DIR);
+    } catch (err) {
+      return setDiscordState("error", (err as Error).message);
+    }
+    const token = settings.discord.token?.trim() || process.env[settings.discord.tokenEnv];
+    if (!token) {
+      return setDiscordState("stopped", `no token — set one in ⚙ → DISCORD (or $${settings.discord.tokenEnv})`);
+    }
+    if (!existsSync(DISCORD_ENTRY)) {
+      // compiled grayskull-web binary: the source entry isn't on disk
+      return setDiscordState("error", "bot entry not found (compiled build) — run grayskull-discord separately");
+    }
+    setDiscordState("starting", "spawning bot process…");
+    try {
+      const proc = Bun.spawn({
+        cmd: [process.execPath, "run", DISCORD_ENTRY],
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env },
+      });
+      discordProc = proc;
+      discordStartedAt = Date.now();
+      void forwardDiscordOutput(proc.stdout as ReadableStream<Uint8Array>, proc);
+      void forwardDiscordOutput(proc.stderr as ReadableStream<Uint8Array>, proc);
+      void proc.exited.then((code) => {
+        if (discordProc !== proc) return; // superseded or deliberately stopped
+        discordProc = null;
+        const early = Date.now() - discordStartedAt < 5000;
+        if (early) {
+          // died within seconds = config problem (bad token, missing intent) —
+          // restarting in a loop would just hammer Discord
+          setDiscordState("error", `bot exited immediately (code ${code}) — check token/intents, see server log`);
+          return;
+        }
+        setDiscordState("error", `bot process died (code ${code}) — auto-restart in 15s`);
+        discordRestartTimer = setTimeout(() => void startDiscordBot(), 15_000);
+      });
+    } catch (err) {
+      setDiscordState("error", (err as Error).message);
+    }
+  };
+  void startDiscordBot();
+  // the bot child must never outlive the server (an orphan would double-reply
+  // after the next start)
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.once(sig, () => {
+      discordProc?.kill();
+      process.exit(0);
+    });
+  }
+  process.once("exit", () => discordProc?.kill());
   scheduler.start();
   setActiveScheduler(scheduler);
 
@@ -392,6 +497,9 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
       case "setup_family_add":
         session?.setupFamilyAdd(String(msg["name"] ?? ""));
         break;
+      case "setup_apikey_add":
+        session?.setupApiKeyAdd(String(msg["name"] ?? ""));
+        break;
       case "modelsdev_search":
         void session?.modelsdevSearch(String(msg["query"] ?? ""));
         break;
@@ -403,6 +511,12 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         break;
       case "setup_recheck":
         void session?.setupRecheck();
+        break;
+      case "discord_flush_memory":
+        session?.discordFlushMemory();
+        break;
+      case "discord_restart":
+        void startDiscordBot();
         break;
       case "skills_open":
         void session?.skillsOpen(String(msg["query"] ?? ""));
@@ -453,11 +567,19 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
   const authed = (req: Request): boolean =>
     !auth.get().hash || checkToken(secret, cookieValue(req, COOKIE_NAME));
 
+  // OpenAI-compatible API (/v1/*) + its OpenAPI doc. It carries its OWN auth
+  // (bearer keys from settings, generated in ⚙ → API) because an external tool
+  // has no login cookie — so it is routed BEFORE the cookie gate below.
+  const openai = new OpenAiApi(opts.defaultCwd, (text) => console.log(text));
+  process.once("exit", () => void openai.closeAll());
+
   const server = Bun.serve<WsData, never>({
     port: opts.port,
     hostname: opts.hostname,
     async fetch(req, srv) {
       const url = new URL(req.url);
+      const apiResponse = await openai.handle(req, url, authed(req));
+      if (apiResponse) return apiResponse;
       if (url.pathname === "/cli") {
         // TUI bridge: local process, no browser, no cookie — loopback only.
         if (!isLoopback(srv.requestIP(req)?.address)) return new Response("forbidden", { status: 403 });
@@ -550,6 +672,7 @@ export function startWebServer(opts: { port: number; hostname: string; defaultCw
         browsers.add(ws);
         ws.send(JSON.stringify({ t: "hello", defaultCwd: opts.defaultCwd, build: UI_BUILD }));
         ws.send(JSON.stringify({ t: "sessions", list: sessionList() }));
+        ws.send(JSON.stringify({ t: "discord_bot", ...discordState }));
         broadcastAuto();
         for (const s of manager.sessions.values()) {
           ws.send(JSON.stringify({ t: "replay", sid: s.sid, items: s.items.slice(-300) }));

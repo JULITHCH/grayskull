@@ -298,6 +298,50 @@ export const SettingsSchema = z.object({
       sessionDays: z.number().min(0.01).default(30),
     })
     .default({ sessionDays: 30 }),
+  /** OpenAI-compatible HTTP API served by grayskull-web (web/openai.ts):
+   *  /v1/models + /v1/chat/completions, so any OpenAI client (Open WebUI,
+   *  LibreChat, n8n, the openai SDK, …) can drive the agent. Keys are
+   *  generated in the ⚙ settings GUI's API tab. */
+  api: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** web search (searxng MCP tools) during API turns. OFF by default —
+       *  turn it on per request with `web_search: true` / `web_search_options`,
+       *  or flip this to make it the default for every request. */
+      webSearch: z.boolean().default(false),
+      /** what an API turn may do: read-only tools, or everything (bash, write,
+       *  edit). read-only is the default — an API key is not a shell. */
+      permissions: z.enum(["read-only", "full"]).default("read-only"),
+      /** concurrent agent sessions the API holds; further requests queue */
+      maxSessions: z.number().int().min(1).max(16).default(2),
+      /** working directory for API turns (default: the server's cwd) */
+      cwd: z.string().optional(),
+      /** hard wall-clock cap per request */
+      timeoutSeconds: z.number().int().min(30).max(3600).default(600),
+      /** project memory during API turns (off = stateless, like the API contract) */
+      memory: z.boolean().default(false),
+      /** bearer keys, generated in the GUI. Plaintext, like discord.token —
+       *  settings.json is already the machine's secret store. */
+      keys: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string().default(""),
+            key: z.string(),
+            createdAt: z.number().default(0),
+          }),
+        )
+        .default([]),
+    })
+    .default({
+      enabled: true,
+      webSearch: false,
+      permissions: "read-only",
+      maxSessions: 2,
+      timeoutSeconds: 600,
+      memory: false,
+      keys: [],
+    }),
   /** grayskull-discord (discord/bot.ts): a real Discord presence that answers
    *  when @mentioned/replied/DM'd, web-searches facts, and is sandboxed to its
    *  bot directory. Token stays in the environment, never in settings. */
@@ -314,8 +358,17 @@ export const SettingsSchema = z.object({
       contextMessages: z.number().int().min(1).max(100).default(30),
       /** hard cap on reply length — longer answers are truncated */
       maxReplyChars: z.number().int().min(200).max(4000).default(1500),
-      /** also respond to the plain word "grayskull" (not just @mentions) */
+      /** attach EVERY fenced code block as a file (false: only oversized ones) */
+      attachAllCode: z.boolean().default(true),
+      /** also respond to the bot's name/per-server nickname in plain text
+       *  (not just @mentions) */
       respondToName: z.boolean().default(true),
+      /** extra plain-text trigger words besides the bot's own names */
+      extraNames: z.array(z.string()).default([]),
+      /** reminder tools ("erinnere mich in 2h an X") */
+      reminders: z.boolean().default(true),
+      /** pending reminders one user may hold at a time */
+      maxRemindersPerUser: z.number().int().min(1).max(100).default(20),
       /** presence line, shown as "Watching <statusText>" */
       statusText: z.string().default("for @mentions"),
       /** restrict to these guild (server) ids; empty = all guilds. DMs are
@@ -325,16 +378,23 @@ export const SettingsSchema = z.object({
       allowedChannels: z.array(z.string()).default([]),
       /** ignore messages from other bots (loop protection) */
       ignoreBots: z.boolean().default(true),
+      /** log one "seen" line per received message (diagnosing silent drops) */
+      logAllMessages: z.boolean().default(true),
     })
     .default({
       tokenEnv: "DISCORD_BOT_TOKEN",
       contextMessages: 30,
       maxReplyChars: 1500,
+      attachAllCode: true,
       respondToName: true,
+      extraNames: [],
+      reminders: true,
+      maxRemindersPerUser: 20,
       statusText: "for @mentions",
       allowedGuilds: [],
       allowedChannels: [],
       ignoreBots: true,
+      logAllMessages: true,
     }),
   /** checkpoint/rewind: snapshot files before every edit-kind tool so /rewind
    *  can restore them (see agent/checkpoints.ts) */

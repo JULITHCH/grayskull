@@ -10,6 +10,9 @@ const FILE_TOOLS = new Set(["read", "write", "edit", "grep", "glob"]);
 /** Web-facing tools the bot may always use (searches + fetches). */
 const WEB_TOOL_RE = /^mcp__(searxng|context7)__/;
 
+/** Harness-owned tools with no reach outside the bot's own state. */
+const SAFE_TOOLS = new Set(["http_request", "todo", "create_reminder", "list_reminders", "cancel_reminder"]);
+
 /**
  * Permission engine for the Discord bot: a hard sandbox instead of the
  * interactive ask flow. The bot may read/write ONLY inside its bot directory,
@@ -26,7 +29,7 @@ export class SandboxPermissionEngine extends PermissionEngine {
 
   override decide(tool: ToolDef, args: Record<string, unknown>): PermissionDecision {
     if (WEB_TOOL_RE.test(tool.name)) return { kind: "allow" };
-    if (tool.name === "http_request" || tool.name === "todo") return { kind: "allow" };
+    if (SAFE_TOOLS.has(tool.name)) return { kind: "allow" };
     if (FILE_TOOLS.has(tool.name)) {
       const path = args["path"];
       if (path === undefined || this.inside(String(path))) return { kind: "allow" };

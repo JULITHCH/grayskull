@@ -107,6 +107,9 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
     const row = rows[sel];
     if (row?.type !== "field") return;
     const f = row.field;
+    if (f.kind === "multiline") {
+      return onNote(`setup: "${f.label}" is multi-line — edit it in the web UI (⚙ → DISCORD) or edit the file directly`);
+    }
     if (f.kind === "toggle") return apply(f, f.value === "on" ? "off" : "on");
     if (f.kind === "enum" && f.options?.length) {
       const next = f.options[(f.options.indexOf(f.value) + 1) % f.options.length]!;
@@ -234,7 +237,7 @@ export function SetupDialog(props: SetupDialogProps): React.ReactElement {
               </Text>
             ) : (
               <Text color={isDirty(f) ? "yellow" : undefined}>
-                {f.kind === "enum" ? `‹ ${f.value} ›` : f.kind === "toggle" ? (f.value === "on" ? "[on]" : "[off]") : f.value || "—"}
+                {f.kind === "enum" ? `‹ ${f.value} ›` : f.kind === "toggle" ? (f.value === "on" ? "[on]" : "[off]") : f.kind === "multiline" ? `(${f.value.split("\n").length} lines — web UI)` : f.value || "—"}
               </Text>
             )}
             {!isEdit && f.hint && <Text dimColor>{"  "}{f.hint}</Text>}

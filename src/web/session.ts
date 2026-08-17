@@ -28,7 +28,7 @@ import {
 } from "../skills/hub";
 import type { ChainDef, ChainContextMode, StepConfig } from "../chains/registry";
 import { runSlashCommand, type CommandContext } from "../slash";
-import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset, addFamily } from "../setup/core";
+import { listGroups, applyField, saveGlobal, checkServices, recheckServices, addPreset, removePreset, addFamily, addApiKey, flushDiscordMemory } from "../setup/core";
 import { modelProfile } from "../llm/profiles";
 import { searchModelsDev, presetFromEntry } from "../llm/modelsdev";
 import {
@@ -544,6 +544,34 @@ export class WebSession {
   setupPresetRemove(name: string): void {
     if (removePreset(this.settings, name)) {
       this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+    }
+  }
+
+  /** DISCORD tab: wipe the bot's project memory (button, effective instantly —
+   *  the bot process reads memory from disk on every turn). */
+  discordFlushMemory(): void {
+    try {
+      const dir = flushDiscordMemory(this.settings);
+      this.bridge.pushItem({ type: "note", text: `discord bot memory flushed (${dir})` });
+      this.send({ t: "discord_memory_flushed" });
+    } catch (err) {
+      this.send({ t: "error", text: `memory flush failed: ${(err as Error).message}` });
+    }
+  }
+
+  /** API tab: mint a bearer key for the OpenAI-compatible API. Persisted
+   *  immediately (see addApiKey) — the key works the moment it appears. */
+  setupApiKeyAdd(name: string): void {
+    try {
+      const entry = addApiKey(this.settings, name);
+      this.send({ t: "setup_groups", groups: listGroups(this.settings), bad: null });
+      this.send({ t: "apikey_created", id: entry.id, key: entry.key });
+      this.bridge.pushItem({
+        type: "note",
+        text: `api: key "${entry.name || entry.id}" created and saved — base URL http://<host>:${process.env["GRAYSKULL_WEB_PORT"] ?? 4242}/v1`,
+      });
+    } catch (err) {
+      this.send({ t: "error", text: `could not create API key: ${(err as Error).message}` });
     }
   }
 

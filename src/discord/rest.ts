@@ -19,7 +19,7 @@ export interface DiscordMessage {
   timestamp?: string;
   mentions?: DiscordUser[];
   referenced_message?: DiscordMessage | null;
-  attachments?: { filename: string; url: string }[];
+  attachments?: { filename: string; url: string; content_type?: string; size?: number }[];
 }
 
 export interface FileUpload {
@@ -51,6 +51,8 @@ export class DiscordRest {
         method,
         headers,
         ...(payload !== undefined ? { body: payload } : {}),
+        // a hung connection must never block the bot's serial reply queue
+        signal: AbortSignal.timeout(30_000),
       });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         const data = (await res.json().catch(() => ({}))) as { retry_after?: number };
@@ -63,6 +65,12 @@ export class DiscordRest {
       }
       return res.status === 204 ? null : await res.json();
     }
+  }
+
+  /** A guild member (used for the bot's own per-server nickname). Works with a
+   *  plain bot token — unlike listing members, it needs no privileged intent. */
+  async guildMember(guildId: string, userId: string): Promise<{ nick?: string | null }> {
+    return (await this.call("GET", `/guilds/${guildId}/members/${userId}`)) as { nick?: string | null };
   }
 
   /** Newest-first, like the API returns them. */
